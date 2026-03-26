@@ -32,9 +32,9 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     scheduler_status = get_scheduler_status()
 
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
-            "request": request,
             "total_regions": total_regions,
             "active_regions": active_regions,
             "recent_logs": recent_logs,
@@ -50,9 +50,9 @@ async def regions_page(request: Request, db: AsyncSession = Depends(get_db)):
     )
     regions = result.scalars().all()
     return templates.TemplateResponse(
+        request,
         "regions.html",
         {
-            "request": request,
             "regions": regions,
         },
     )
@@ -68,9 +68,9 @@ async def schedules_page(request: Request, db: AsyncSession = Depends(get_db)):
     source_names = list(manager.collectors.keys()) if manager else []
 
     return templates.TemplateResponse(
+        request,
         "schedules.html",
         {
-            "request": request,
             "schedules": schedules,
             "source_names": source_names,
         },
