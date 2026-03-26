@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+{% block title %}Schedules — RE Admin{% endblock %}
+{% block nav_schedules %}active{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Schedules</h1>
+  <button class="btn btn-primary" onclick="openAddModal()">+ Add Schedule</button>
+</div>
+
+<!-- Schedules Table -->
+<div class="table-wrap" style="margin-bottom:24px;">
+  <div class="table-header">
+    <span class="table-title">Collection Schedules</span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Source</th>
+        <th>Interval</th>
+        <th>Active</th>
+        <th style="width:100px;">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="schedules-tbody">
+      {% for s in schedules %}
+      <tr data-id="{{ s.id }}">
+        <td style="font-weight:500;">{{ s.name }}</td>
+        <td>
+          {% if s.source_type %}
+            <span class="badge badge-blue">{{ s.source_type }}</span>
+          {% else %}
+            <span style="color:var(--muted);">all</span>
+          {% endif %}
+        </td>
+        <td>
+          <span id="interval-display-{{ s.id }}">{{ s.interval_minutes }}m</span>
+        </td>
+        <td>
+          <label class="toggle">
+            <input type="checkbox" {% if s.is_active %}checked{% endif %}
+              onchange="toggleScheduleActive({{ s.id }}, this.checked)" />
+            <span class="toggle-slider"></span>
+          </label>
+        </td>
+        <td>
+          <button class="btn btn-ghost btn-sm btn-icon" title="Edit"
+            onclick="openEditModal({{ s.id }}, '{{ s.name }}', '{{ s.source_type or '' }}', {{ s.interval_minutes }}, {{ 'true' if s.is_active else 'false' }})">&#9998;</button>
+          <button class="btn btn-danger btn-sm btn-icon" title="Delete"
+            onclick="deleteSchedule({{ s.id }}, '{{ s.name }}')">&#128465;</button>
+        </td>
+      </tr>
+      {% else %}
+      <tr class="empty-row"><td colspan="5">No schedules yet</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Manual Trigger Section -->
+<div class="table-wrap">
+  <div class="table-header">
+    <span class="table-title">Manual Collection Trigger</span>
+  </div>
+  <div style="padding:20px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:16px;align-items:end;">
+      <div class="form-group" style="margin:0;">
+        <label>Sources</label>
+        <select id="trigger-source" multiple style="height:90px;">
+          <option value="">— all sources —</option>
+          {% for name in source_names %}
+          <option value="{{ name }}">{{ name }}</option>
+          {% endfor %}
+        </select>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px;">Hold Ctrl/Cmd to select multiple</div>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label>Region codes</label>
+        <textarea id="trigger-regions" rows="3" placeholder="One code per line, or blank for all&#10;11110&#10;11140"></textarea>
+      </div>
+      <div>
+        <button class="btn btn-primary" id="trigger-btn" onclick="runTrigger()">
+          &#9654; Run Now
+        </button>
+      </div>
+    </div>
+    <div id="trigger-result" style="margin-top:12px;display:none;">
+      <span class="badge badge-green">&#10003; Collection started!</span>
+    </div>
+  </div>
+</div>
+
+<!-- Scheduler Status -->
+<div style="margin-top:24px;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);">
+  <div style="font-weight:600;margin-bottom:8px;font-size:13px;">Scheduler Status</div>
+  <div id="status-display" style="color:var(--muted);font-size:13px;">Loading…</div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal-backdrop" id="schedule-modal">
+  <div class="modal">
+    <div class="modal-title" id="modal-title">Add Schedule</div>
+    <input type="hidden" id="edit-id" />
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" id="field-name" placeholder="e.g. nightly-all" />
+    </div>
+    <div class="form-group">
+      <label>Source Type <span style="color:var(--muted);font-weight:400;">(blank = all)</span></label>
+      <select id="field-source">
+        <option value="">— all —</option>
+        {% for name in source_names %}
+        <option value="{{ name }}">{{ name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Interval (minutes)</label>
+      <input type="number" id="field-interval" value="60" min="1" />
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+      <label style="margin:0;">Active</label>
+      <label class="toggle">
+        <input type="checkbox" id="field-active" checked />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('schedule-modal')">Cancel</button>
+      <button class="btn btn-primary" id="modal-save-btn" onclick="saveSchedule()">Save</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // ── Status ──
+  async function loadStatus() {
+    try {
+      const data = await apiFetch("/api/status");
+      const s = data.scheduler;
+      const el = document.getElementById("status-display");
+      el.innerHTML = `
+        <span class="badge ${s.running ? 'badge-green' : 'badge-red'}" style="margin-right:8px;">
+          ${s.running ? "&#9679; Running" : "&#9679; Stopped"}
+        </span>
+        Sources: <strong>${data.registered_sources.join(", ") || "none"}</strong>
+        ${s.next_run_time ? ` &nbsp;|&nbsp; Next run: <strong>${s.next_run_time}</strong>` : ""}
+      `;
+    } catch (e) {
+      document.getElementById("status-display").textContent = "Could not load status";
+    }
+  }
+  loadStatus();
+
+  // ── Modal ──
+  function openAddModal() {
+    document.getElementById("modal-title").textContent = "Add Schedule";
+    document.getElementById("edit-id").value = "";
+    document.getElementById("field-name").value = "";
+    document.getElementById("field-source").value = "";
+    document.getElementById("field-interval").value = "60";
+    document.getElementById("field-active").checked = true;
+    document.getElementById("modal-save-btn").textContent = "Add";
+    document.getElementById("schedule-modal").classList.add("open");
+  }
+
+  function openEditModal(id, name, source, interval, isActive) {
+    document.getElementById("modal-title").textContent = "Edit Schedule";
+    document.getElementById("edit-id").value = id;
+    document.getElementById("field-name").value = name;
+    document.getElementById("field-source").value = source;
+    document.getElementById("field-interval").value = interval;
+    document.getElementById("field-active").checked = isActive;
+    document.getElementById("modal-save-btn").textContent = "Save";
+    document.getElementById("schedule-modal").classList.add("open");
+  }
+
+  function closeModal(id) {
+    document.getElementById(id).classList.remove("open");
+  }
+
+  document.getElementById("schedule-modal").addEventListener("click", function(e) {
+    if (e.target === this) closeModal("schedule-modal");
+  });
+
+  // ── CRUD ──
+  async function saveSchedule() {
+    const id = document.getElementById("edit-id").value;
+    const sourceVal = document.getElementById("field-source").value;
+    const payload = {
+      name: document.getElementById("field-name").value.trim(),
+      source_type: sourceVal || null,
+      interval_minutes: parseInt(document.getElementById("field-interval").value, 10),
+      is_active: document.getElementById("field-active").checked,
+    };
+    if (!payload.name || isNaN(payload.interval_minutes) || payload.interval_minutes < 1) {
+      showToast("Name and a valid interval are required", "error");
+      return;
+    }
+    try {
+      if (id) {
+        await apiFetch(`/api/schedules/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+        showToast("Schedule updated", "success");
+      } else {
+        await apiFetch("/api/schedules/", { method: "POST", body: JSON.stringify(payload) });
+        showToast("Schedule added", "success");
+      }
+      closeModal("schedule-modal");
+      location.reload();
+    } catch (e) {
+      showToast("Error: " + e.message, "error");
+    }
+  }
+
+  async function toggleScheduleActive(id, isActive) {
+    try {
+      await apiFetch(`/api/schedules/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ is_active: isActive }),
+      });
+      showToast(isActive ? "Schedule activated" : "Schedule deactivated");
+    } catch (e) {
+      showToast("Error: " + e.message, "error");
+      location.reload();
+    }
+  }
+
+  async function deleteSchedule(id, name) {
+    if (!confirm(`Delete schedule "${name}"?`)) return;
+    try {
+      await apiFetch(`/api/schedules/${id}`, { method: "DELETE" });
+      showToast("Schedule deleted");
+      document.querySelector(`tr[data-id="${id}"]`).remove();
+    } catch (e) {
+      showToast("Error: " + e.message, "error");
+    }
+  }
+
+  // ── Manual Trigger ──
+  async function runTrigger() {
+    const select = document.getElementById("trigger-source");
+    const selected = Array.from(select.selectedOptions)
+      .map(o => o.value)
+      .filter(Boolean);
+    const sources = selected.length ? selected : null;
+
+    const regionsRaw = document.getElementById("trigger-regions").value.trim();
+    const region_codes = regionsRaw
+      ? regionsRaw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean)
+      : null;
+
+    const btn = document.getElementById("trigger-btn");
+    btn.disabled = true;
+    btn.textContent = "Starting…";
+
+    try {
+      await apiFetch("/api/collect", {
+        method: "POST",
+        body: JSON.stringify({ sources, region_codes }),
+      });
+      const resultEl = document.getElementById("trigger-result");
+      resultEl.style.display = "block";
+      setTimeout(() => { resultEl.style.display = "none"; }, 4000);
+      showToast("Collection started!", "success");
+    } catch (e) {
+      showToast("Error: " + e.message, "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "▶ Run Now";
+    }
+  }
+</script>
+{% endblock %}

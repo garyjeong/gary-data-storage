@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — RE Admin{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Dashboard</h1>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <span id="refresh-countdown" style="color:var(--muted);font-size:12px;"></span>
+    <button class="btn btn-primary" id="collect-btn" onclick="triggerCollect()">
+      &#9654; Collect Now
+    </button>
+  </div>
+</div>
+
+<!-- Stats -->
+<div class="stats-grid">
+  <div class="card">
+    <div class="card-title">Total Regions</div>
+    <div class="card-value">{{ total_regions }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Active Regions</div>
+    <div class="card-value" style="color:var(--success);">{{ active_regions }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Scheduler</div>
+    <div class="card-value" style="font-size:18px;display:flex;align-items:center;gap:8px;margin-top:4px;">
+      {% if scheduler and scheduler.running %}
+        <span class="badge badge-green">&#9679; Running</span>
+      {% else %}
+        <span class="badge badge-red">&#9679; Stopped</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Next Run</div>
+    <div class="card-value" style="font-size:16px;margin-top:4px;" id="next-run">
+      {% if scheduler and scheduler.next_run_time %}
+        {{ scheduler.next_run_time }}
+      {% else %}
+        —
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Recent Logs -->
+<div class="table-wrap">
+  <div class="table-header">
+    <span class="table-title">Recent Collection Logs</span>
+    <button class="btn btn-ghost btn-sm" onclick="loadLogs()">&#8635; Refresh</button>
+  </div>
+  <table id="logs-table">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Source</th>
+        <th>Region</th>
+        <th>Records</th>
+        <th>Duration</th>
+        <th>Status</th>
+        <th>Error</th>
+      </tr>
+    </thead>
+    <tbody id="logs-tbody">
+      {% if recent_logs %}
+        {% for log in recent_logs %}
+        <tr>
+          <td style="white-space:nowrap;color:var(--muted);font-size:12px;">
+            {{ log.started_at.strftime('%m-%d %H:%M:%S') if log.started_at else '—' }}
+          </td>
+          <td><span class="badge badge-blue">{{ log.source or '—' }}</span></td>
+          <td>{{ log.region_code or '—' }}</td>
+          <td style="font-weight:600;">{{ log.records_collected or 0 }}</td>
+          <td style="color:var(--muted);font-size:12px;">
+            {% if log.started_at and log.finished_at %}
+              {{ ((log.finished_at - log.started_at).total_seconds() | round(1)) }}s
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if log.status == 'success' %}
+              <span class="badge badge-green">&#10003; success</span>
+            {% elif log.status == 'error' %}
+              <span class="badge badge-red">&#10007; error</span>
+            {% elif log.status == 'running' %}
+              <span class="badge badge-yellow">&#8987; running</span>
+            {% else %}
+              <span class="badge badge-gray">{{ log.status or '—' }}</span>
+            {% endif %}
+          </td>
+          <td style="color:var(--danger);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            {{ log.error_message or '' }}
+          </td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr class="empty-row"><td colspan="7">No logs yet</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Collect Modal -->
+<div class="modal-backdrop" id="collect-modal">
+  <div class="modal">
+    <div class="modal-title">Manual Collection</div>
+    <div class="form-group">
+      <label>Sources (comma-separated, blank = all)</label>
+      <input type="text" id="collect-sources" placeholder="e.g. naver,kb" />
+    </div>
+    <div class="form-group">
+      <label>Region codes (comma-separated, blank = all)</label>
+      <input type="text" id="collect-regions" placeholder="e.g. 11110,11140" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('collect-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitCollect()">&#9654; Start</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // ── Auto-refresh ──
+  let countdown = 30;
+  const countdownEl = document.getElementById("refresh-countdown");
+  function tick() {
+    countdownEl.textContent = `Auto-refresh in ${countdown}s`;
+    if (--countdown <= 0) {
+      loadLogs();
+      countdown = 30;
+    }
+  }
+  setInterval(tick, 1000);
+
+  // ── Logs ──
+  async function loadLogs() {
+    try {
+      const logs = await apiFetch("/api/logs?limit=20");
+      const tbody = document.getElementById("logs-tbody");
+      if (!logs.length) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No logs yet</td></tr>';
+        return;
+      }
+      tbody.innerHTML = logs.map(log => {
+        const time = log.started_at ? log.started_at.replace("T", " ").slice(5, 19) : "—";
+        const dur = (log.started_at && log.finished_at)
+          ? ((new Date(log.finished_at) - new Date(log.started_at)) / 1000).toFixed(1) + "s"
+          : "—";
+        const statusBadge = {
+          success: '<span class="badge badge-green">&#10003; success</span>',
+          error:   '<span class="badge badge-red">&#10007; error</span>',
+          running: '<span class="badge badge-yellow">&#8987; running</span>',
+        }[log.status] || `<span class="badge badge-gray">${log.status || "—"}</span>`;
+        return `<tr>
+          <td style="white-space:nowrap;color:var(--muted);font-size:12px;">${time}</td>
+          <td><span class="badge badge-blue">${log.source || "—"}</span></td>
+          <td>${log.region_code || "—"}</td>
+          <td style="font-weight:600;">${log.records_collected ?? 0}</td>
+          <td style="color:var(--muted);font-size:12px;">${dur}</td>
+          <td>${statusBadge}</td>
+          <td style="color:var(--danger);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${log.error_message || ""}</td>
+        </tr>`;
+      }).join("");
+    } catch (e) {
+      showToast("Failed to load logs: " + e.message, "error");
+    }
+  }
+
+  // ── Collect ──
+  function triggerCollect() {
+    document.getElementById("collect-modal").classList.add("open");
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.remove("open");
+  }
+
+  async function submitCollect() {
+    const sourcesRaw = document.getElementById("collect-sources").value.trim();
+    const regionsRaw = document.getElementById("collect-regions").value.trim();
+    const sources = sourcesRaw ? sourcesRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
+    const region_codes = regionsRaw ? regionsRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
+
+    try {
+      const btn = document.querySelector("#collect-modal .btn-primary");
+      btn.disabled = true;
+      btn.textContent = "Starting…";
+      await apiFetch("/api/collect", {
+        method: "POST",
+        body: JSON.stringify({ sources, region_codes }),
+      });
+      showToast("Collection started!", "success");
+      closeModal("collect-modal");
+      setTimeout(loadLogs, 2000);
+    } catch (e) {
+      showToast("Error: " + e.message, "error");
+    } finally {
+      const btn = document.querySelector("#collect-modal .btn-primary");
+      btn.disabled = false;
+      btn.textContent = "▶ Start";
+    }
+  }
+
+  // close modal on backdrop click
+  document.getElementById("collect-modal").addEventListener("click", function(e) {
+    if (e.target === this) closeModal("collect-modal");
+  });
+</script>
+{% endblock %}

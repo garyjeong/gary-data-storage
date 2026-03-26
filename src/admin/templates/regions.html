@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}Regions — RE Admin{% endblock %}
+{% block nav_regions %}active{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Regions</h1>
+  <button class="btn btn-primary" onclick="openAddModal()">+ Add Region</button>
+</div>
+
+<!-- Filter bar -->
+<div class="filter-bar">
+  <span style="font-weight:600;font-size:13px;">Filter:</span>
+  <button class="btn btn-ghost btn-sm filter-btn active" data-area="all">All</button>
+  {% set areas = [] %}
+  {% for r in regions %}
+    {% if r.parent_area and r.parent_area not in areas %}
+      {% set _ = areas.append(r.parent_area) %}
+    {% endif %}
+  {% endfor %}
+  {% for area in areas|sort %}
+  <button class="btn btn-ghost btn-sm filter-btn" data-area="{{ area }}">{{ area }}</button>
+  {% endfor %}
+  <input
+    type="text"
+    id="search-input"
+    placeholder="Search name or code…"
+    style="width:200px;padding:6px 10px;"
+    oninput="applyFilter()"
+  />
+</div>
+
+<!-- Table -->
+<div class="table-wrap">
+  <div class="table-header">
+    <span class="table-title">Region List</span>
+    <span id="region-count" style="color:var(--muted);font-size:13px;"></span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Code</th>
+        <th>Name</th>
+        <th>Area</th>
+        <th>Active</th>
+        <th style="width:100px;">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="regions-tbody">
+      {% for r in regions %}
+      <tr data-id="{{ r.id }}" data-area="{{ r.parent_area }}" data-name="{{ r.name }}" data-code="{{ r.region_code }}">
+        <td style="font-family:monospace;font-size:13px;">{{ r.region_code }}</td>
+        <td style="font-weight:500;">{{ r.name }}</td>
+        <td><span class="badge badge-blue">{{ r.parent_area }}</span></td>
+        <td>
+          <label class="toggle">
+            <input type="checkbox" {% if r.is_active %}checked{% endif %}
+              onchange="toggleActive({{ r.id }}, this.checked)" />
+            <span class="toggle-slider"></span>
+          </label>
+        </td>
+        <td>
+          <button class="btn btn-ghost btn-sm btn-icon" title="Edit" onclick="openEditModal({{ r.id }}, '{{ r.name }}', '{{ r.region_code }}', '{{ r.parent_area }}', {{ 'true' if r.is_active else 'false' }})">&#9998;</button>
+          <button class="btn btn-danger btn-sm btn-icon" title="Delete" onclick="deleteRegion({{ r.id }}, '{{ r.name }}')">&#128465;</button>
+        </td>
+      </tr>
+      {% else %}
+      <tr class="empty-row"><td colspan="5">No regions yet</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal-backdrop" id="region-modal">
+  <div class="modal">
+    <div class="modal-title" id="modal-title">Add Region</div>
+    <input type="hidden" id="edit-id" />
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" id="field-name" placeholder="e.g. 강남구" />
+    </div>
+    <div class="form-group">
+      <label>Region Code</label>
+      <input type="text" id="field-code" placeholder="e.g. 11680" />
+    </div>
+    <div class="form-group">
+      <label>Parent Area</label>
+      <input type="text" id="field-area" placeholder="e.g. 서울" />
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+      <label style="margin:0;">Active</label>
+      <label class="toggle">
+        <input type="checkbox" id="field-active" checked />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('region-modal')">Cancel</button>
+      <button class="btn btn-primary" id="modal-save-btn" onclick="saveRegion()">Save</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let activeFilter = "all";
+
+  // ── Filter ──
+  document.querySelectorAll(".filter-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      activeFilter = btn.dataset.area;
+      applyFilter();
+    });
+  });
+
+  function applyFilter() {
+    const search = document.getElementById("search-input").value.toLowerCase();
+    const rows = document.querySelectorAll("#regions-tbody tr[data-id]");
+    let visible = 0;
+    rows.forEach(row => {
+      const areaMatch = activeFilter === "all" || row.dataset.area === activeFilter;
+      const searchMatch = !search
+        || row.dataset.name.toLowerCase().includes(search)
+        || row.dataset.code.toLowerCase().includes(search);
+      const show = areaMatch && searchMatch;
+      row.style.display = show ? "" : "none";
+      if (show) visible++;
+    });
+    document.getElementById("region-count").textContent = `${visible} region(s)`;
+  }
+
+  // Init count
+  applyFilter();
+
+  // ── Modal ──
+  function openAddModal() {
+    document.getElementById("modal-title").textContent = "Add Region";
+    document.getElementById("edit-id").value = "";
+    document.getElementById("field-name").value = "";
+    document.getElementById("field-code").value = "";
+    document.getElementById("field-area").value = "";
+    document.getElementById("field-active").checked = true;
+    document.getElementById("modal-save-btn").textContent = "Add";
+    document.getElementById("region-modal").classList.add("open");
+  }
+
+  function openEditModal(id, name, code, area, isActive) {
+    document.getElementById("modal-title").textContent = "Edit Region";
+    document.getElementById("edit-id").value = id;
+    document.getElementById("field-name").value = name;
+    document.getElementById("field-code").value = code;
+    document.getElementById("field-area").value = area;
+    document.getElementById("field-active").checked = isActive;
+    document.getElementById("modal-save-btn").textContent = "Save";
+    document.getElementById("region-modal").classList.add("open");
+  }
+
+  function closeModal(id) {
+    document.getElementById(id).classList.remove("open");
+  }
+
+  document.getElementById("region-modal").addEventListener("click", function(e) {
+    if (e.target === this) closeModal("region-modal");
+  });
+
+  // ── CRUD ──
+  async function saveRegion() {
+    const id = document.getElementById("edit-id").value;
+    const payload = {
+      name: document.getElementById("field-name").value.trim(),
+      region_code: document.getElementById("field-code").value.trim(),
+      parent_area: document.getElementById("field-area").value.trim(),
+      is_active: document.getElementById("field-active").checked,
+    };
+    if (!payload.name || !payload.region_code || !payload.parent_area) {
+      showToast("All fields are required", "error");
+      return;
+    }
+    try {
+      if (id) {
+        await apiFetch(`/api/regions/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+        showToast("Region updated", "success");
+      } else {
+        await apiFetch("/api/regions/", { method: "POST", body: JSON.stringify(payload) });
+        showToast("Region added", "success");
+      }
+      closeModal("region-modal");
+      location.reload();
+    } catch (e) {
+      showToast("Error: " + e.message, "error");
+    }
+  }
+
+  async function toggleActive(id, isActive) {
+    try {
+      await apiFetch(`/api/regions/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ is_active: isActive }),
+      });
+      showToast(isActive ? "Region activated" : "Region deactivated");
+    } catch (e) {
+      showToast("Error: " + e.message, "error");
+      location.reload();
+    }
+  }
+
+  async function deleteRegion(id, name) {
+    if (!confirm(`Delete region "${name}"?`)) return;
+    try {
+      await apiFetch(`/api/regions/${id}`, { method: "DELETE" });
+      showToast("Region deleted");
+      document.querySelector(`tr[data-id="${id}"]`).remove();
+      applyFilter();
+    } catch (e) {
+      showToast("Error: " + e.message, "error");
+    }
+  }
+</script>
+{% endblock %}
