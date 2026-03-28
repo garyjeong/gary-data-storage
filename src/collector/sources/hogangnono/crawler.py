@@ -88,9 +88,9 @@ async def _fetch_with_retry(
         try:
             response = await client.get(url, params=params)
 
-            if response.status_code in (403, 429):
+            if 400 <= response.status_code < 500:
                 logger.warning(
-                    "[hogangnono] HTTP %d from %s — skipping (rate-limit or access denied)",
+                    "[hogangnono] HTTP %d from %s — skipping (client error)",
                     response.status_code,
                     url,
                 )
