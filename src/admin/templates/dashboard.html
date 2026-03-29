@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Dashboard{% endblock %}
+{% block title %}대시보드{% endblock %}
 {% block nav_dashboard %}active{% endblock %}
-{% block topbar_title %}Dashboard{% endblock %}
+{% block topbar_title %}대시보드{% endblock %}
 {% block topbar_actions %}
   <span id="refresh-countdown" style="color:var(--text-muted);font-size:12px;"></span>
   <button class="btn btn-primary btn-sm" onclick="document.getElementById('collect-modal').classList.add('open')">
-    Collect Now
+    수집 실행
   </button>
 {% endblock %}
 
@@ -13,41 +13,41 @@
 <!-- Stats Row -->
 <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
   <div class="card">
-    <div class="card-title">Transactions</div>
-    <div class="card-value">{{ "{:,}".format(total_transactions) }}</div>
+    <div class="card-title">실거래 데이터</div>
+    <div class="card-value">{{ "{:,}".format(total_transactions) }}<span style="font-size:13px;color:var(--text-muted);font-weight:400;"> 건</span></div>
     <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">
-      <span style="color:var(--danger);">Sale {{ "{:,}".format(sale_count) }}</span>
+      <span style="color:var(--danger);">매매 {{ "{:,}".format(sale_count) }}</span>
       &middot;
-      <span style="color:var(--primary);">Jeonse {{ "{:,}".format(jeonse_count) }}</span>
+      <span style="color:var(--primary);">전세 {{ "{:,}".format(jeonse_count) }}</span>
     </div>
   </div>
   <div class="card">
-    <div class="card-title">Avg Sale Price</div>
+    <div class="card-title">매매 평균가</div>
     <div class="card-value" style="font-size:22px;">
-      {% if sale_avg %}{{ "{:,}".format(sale_avg) }}<span style="font-size:13px;color:var(--text-muted);font-weight:400;"> M</span>{% else %}&mdash;{% endif %}
+      {% if sale_avg %}{{ "{:,}".format(sale_avg) }}<span style="font-size:13px;color:var(--text-muted);font-weight:400;"> 만원</span>{% else %}&mdash;{% endif %}
     </div>
   </div>
   <div class="card">
-    <div class="card-title">Price Statistics</div>
-    <div class="card-value">{{ "{:,}".format(total_statistics) }}</div>
+    <div class="card-title">가격 지수</div>
+    <div class="card-value">{{ "{:,}".format(total_statistics) }}<span style="font-size:13px;color:var(--text-muted);font-weight:400;"> 건</span></div>
   </div>
   <div class="card">
-    <div class="card-title">Active Regions</div>
+    <div class="card-title">수집 지역</div>
     <div class="card-value">
       <span style="color:var(--success);">{{ active_regions }}</span>
-      <span style="font-size:14px;color:var(--text-muted);font-weight:400;">/ {{ total_regions }}</span>
+      <span style="font-size:14px;color:var(--text-muted);font-weight:400;">/ {{ total_regions }}개</span>
     </div>
   </div>
   <div class="card">
-    <div class="card-title">Scheduler</div>
+    <div class="card-title">스케줄러</div>
     <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
       {% if scheduler and scheduler.running %}
-        <span class="badge badge-green">Running</span>
+        <span class="badge badge-green">실행 중</span>
       {% else %}
-        <span class="badge badge-red">Stopped</span>
+        <span class="badge badge-red">중지됨</span>
       {% endif %}
       {% if scheduler and scheduler.interval_minutes %}
-        <span style="font-size:12px;color:var(--text-muted);">{{ scheduler.interval_minutes|int }}min</span>
+        <span style="font-size:12px;color:var(--text-muted);">{{ scheduler.interval_minutes|int }}분 간격</span>
       {% endif %}
     </div>
   </div>
@@ -58,16 +58,16 @@
   <!-- Latest Transactions -->
   <div class="table-wrap">
     <div class="table-header">
-      <span class="table-title">Latest Transactions</span>
-      <a href="/data" class="btn btn-ghost btn-sm" style="cursor:pointer;">View All</a>
+      <span class="table-title">최근 거래</span>
+      <a href="/data" class="btn btn-ghost btn-sm" style="cursor:pointer;">전체 보기</a>
     </div>
     <table>
       <thead>
         <tr>
-          <th>Date</th>
-          <th>Type</th>
-          <th>Apartment</th>
-          <th style="text-align:right">Price</th>
+          <th>거래일</th>
+          <th>유형</th>
+          <th>아파트</th>
+          <th style="text-align:right">금액 (만원)</th>
         </tr>
       </thead>
       <tbody>
@@ -79,9 +79,9 @@
             </td>
             <td>
               {% if tx.transaction_type == 'sale' %}
-                <span class="badge badge-red">Sale</span>
+                <span class="badge badge-red">매매</span>
               {% else %}
-                <span class="badge badge-blue">Jeonse</span>
+                <span class="badge badge-blue">전세</span>
               {% endif %}
             </td>
             <td>
@@ -98,7 +98,7 @@
           </tr>
           {% endfor %}
         {% else %}
-          <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:32px;">No transaction data yet</td></tr>
+          <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:32px;">거래 데이터 없음</td></tr>
         {% endif %}
       </tbody>
     </table>
@@ -107,16 +107,16 @@
   <!-- Collection Logs -->
   <div class="table-wrap">
     <div class="table-header">
-      <span class="table-title">Recent Collection Logs</span>
-      <button class="btn btn-ghost btn-sm" onclick="loadLogs()" style="cursor:pointer;">Refresh</button>
+      <span class="table-title">최근 수집 로그</span>
+      <button class="btn btn-ghost btn-sm" onclick="loadLogs()" style="cursor:pointer;">새로고침</button>
     </div>
     <table>
       <thead>
         <tr>
-          <th>Time</th>
-          <th>Source</th>
-          <th style="text-align:right">Records</th>
-          <th>Status</th>
+          <th>시간</th>
+          <th>소스</th>
+          <th style="text-align:right">건수</th>
+          <th>상태</th>
         </tr>
       </thead>
       <tbody id="logs-tbody">
@@ -130,9 +130,9 @@
             <td class="number" style="font-weight:600;">{{ log.records_collected or 0 }}</td>
             <td>
               {% if log.status == 'success' %}
-                <span class="badge badge-green">OK</span>
+                <span class="badge badge-green">성공</span>
               {% elif log.status == 'error' %}
-                <span class="badge badge-red" title="{{ log.error_message or '' }}" style="cursor:default;">Err</span>
+                <span class="badge badge-red" title="{{ log.error_message or '' }}" style="cursor:default;">실패</span>
               {% else %}
                 <span class="badge badge-gray">{{ log.status or '—' }}</span>
               {% endif %}
@@ -140,7 +140,7 @@
           </tr>
           {% endfor %}
         {% else %}
-          <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:32px;">No logs yet</td></tr>
+          <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:32px;">수집 로그 없음</td></tr>
         {% endif %}
       </tbody>
     </table>
@@ -150,18 +150,18 @@
 <!-- Collect Modal -->
 <div class="modal-backdrop" id="collect-modal">
   <div class="modal">
-    <div class="modal-title">Manual Collection</div>
+    <div class="modal-title">수동 수집 실행</div>
     <div class="form-group">
-      <label>Sources (comma-separated, blank = all)</label>
-      <input type="text" id="collect-sources" placeholder="e.g. molit_sale, naver" />
+      <label>소스 (쉼표 구분, 비우면 전체)</label>
+      <input type="text" id="collect-sources" placeholder="예: molit_sale, naver" />
     </div>
     <div class="form-group">
-      <label>Region codes (comma-separated, blank = all)</label>
-      <input type="text" id="collect-regions" placeholder="e.g. 11680, 11650" />
+      <label>지역코드 (쉼표 구분, 비우면 전체)</label>
+      <input type="text" id="collect-regions" placeholder="예: 11680, 11650" />
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('collect-modal')">Cancel</button>
-      <button class="btn btn-primary" id="collect-submit" onclick="submitCollect()">Start Collection</button>
+      <button class="btn btn-ghost" onclick="closeModal('collect-modal')">취소</button>
+      <button class="btn btn-primary" id="collect-submit" onclick="submitCollect()">수집 시작</button>
     </div>
   </div>
 </div>
@@ -172,7 +172,7 @@
   let countdown = 30;
   const countdownEl = document.getElementById("refresh-countdown");
   function tick() {
-    countdownEl.textContent = `Refresh ${countdown}s`;
+    countdownEl.textContent = `${countdown}초 후 새로고침`;
     if (--countdown <= 0) { loadLogs(); countdown = 30; }
   }
   setInterval(tick, 1000);
@@ -182,14 +182,14 @@
       const logs = await apiFetch("/api/logs?limit=15");
       const tbody = document.getElementById("logs-tbody");
       if (!logs.length) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:32px;">No logs yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:32px;">수집 로그 없음</td></tr>';
         return;
       }
       tbody.innerHTML = logs.map(log => {
         const time = log.started_at ? log.started_at.replace("T", " ").slice(5, 16) : "—";
         const st = {
-          success: '<span class="badge badge-green">OK</span>',
-          error: `<span class="badge badge-red" title="${(log.error_message||'').replace(/"/g,'&quot;')}" style="cursor:default;">Err</span>`,
+          success: '<span class="badge badge-green">성공</span>',
+          error: `<span class="badge badge-red" title="${(log.error_message||'').replace(/"/g,'&quot;')}" style="cursor:default;">실패</span>`,
         }[log.status] || `<span class="badge badge-gray">${log.status || "—"}</span>`;
         return `<tr>
           <td style="font-size:12px;color:var(--text-muted);white-space:nowrap;">${time}</td>
@@ -199,7 +199,7 @@
         </tr>`;
       }).join("");
     } catch (e) {
-      showToast("Failed to load logs: " + e.message, "error");
+      showToast("로그 로딩 실패: " + e.message, "error");
     }
   }
 
@@ -210,15 +210,15 @@
     const region_codes = regionsRaw ? regionsRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
     const btn = document.getElementById("collect-submit");
     try {
-      btn.disabled = true; btn.textContent = "Starting...";
+      btn.disabled = true; btn.textContent = "시작 중...";
       await apiFetch("/api/collect", { method: "POST", body: JSON.stringify({ sources, region_codes }) });
-      showToast("Collection started!", "success");
+      showToast("수집이 시작되었습니다!", "success");
       closeModal("collect-modal");
       setTimeout(loadLogs, 2000);
     } catch (e) {
-      showToast("Error: " + e.message, "error");
+      showToast("오류: " + e.message, "error");
     } finally {
-      btn.disabled = false; btn.textContent = "Start Collection";
+      btn.disabled = false; btn.textContent = "수집 시작";
     }
   }
 

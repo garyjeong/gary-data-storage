@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Data Viewer{% endblock %}
+{% block title %}데이터 조회{% endblock %}
 {% block nav_data %}active{% endblock %}
-{% block topbar_title %}Data Viewer{% endblock %}
+{% block topbar_title %}데이터 조회{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -40,79 +40,79 @@
 
 {% block content %}
 <div class="page-header">
-  <h1 class="page-title">Data Viewer</h1>
+  <h1 class="page-title">데이터 조회</h1>
 </div>
 
 <!-- Summary cards -->
 <div class="stats-grid">
   <div class="card">
-    <div class="card-title">Transactions</div>
-    <div class="card-value">{{ "{:,}".format(summary.transactions) }}</div>
+    <div class="card-title">실거래 데이터</div>
+    <div class="card-value">{{ "{:,}".format(summary.transactions) }}<span style="font-size:13px;color:var(--text-muted);font-weight:400;"> 건</span></div>
   </div>
   <div class="card">
-    <div class="card-title">Price Statistics</div>
-    <div class="card-value">{{ "{:,}".format(summary.statistics) }}</div>
+    <div class="card-title">가격 지수</div>
+    <div class="card-value">{{ "{:,}".format(summary.statistics) }}<span style="font-size:13px;color:var(--text-muted);font-weight:400;"> 건</span></div>
   </div>
   <div class="card">
-    <div class="card-title">Complexes</div>
-    <div class="card-value">{{ "{:,}".format(summary.complexes) }}</div>
+    <div class="card-title">단지 정보</div>
+    <div class="card-value">{{ "{:,}".format(summary.complexes) }}<span style="font-size:13px;color:var(--text-muted);font-weight:400;"> 건</span></div>
   </div>
   <div class="card">
-    <div class="card-title">Buildings</div>
-    <div class="card-value">{{ "{:,}".format(summary.buildings) }}</div>
+    <div class="card-title">건축물대장</div>
+    <div class="card-value">{{ "{:,}".format(summary.buildings) }}<span style="font-size:13px;color:var(--text-muted);font-weight:400;"> 건</span></div>
   </div>
 </div>
 
 <!-- Tabs -->
 <div class="tab-bar">
-  <button class="tab-btn active" onclick="switchTab('transactions')">Transactions</button>
-  <button class="tab-btn" onclick="switchTab('statistics')">Price Index</button>
+  <button class="tab-btn active" onclick="switchTab('transactions')">실거래</button>
+  <button class="tab-btn" onclick="switchTab('statistics')">가격 지수</button>
 </div>
 
 <!-- Tab: Transactions -->
 <div id="tab-transactions" class="tab-panel active">
   <div class="filter-row">
     <div class="filter-group">
-      <label>Region</label>
+      <label>지역</label>
       <select id="tx-region">
-        <option value="">All</option>
+        <option value="">전체</option>
         {% for r in regions %}
         <option value="{{ r.region_code }}">{{ r.name }} ({{ r.parent_area }})</option>
         {% endfor %}
       </select>
     </div>
     <div class="filter-group">
-      <label>Type</label>
+      <label>유형</label>
       <select id="tx-type">
-        <option value="">All</option>
-        <option value="sale">Sale</option>
-        <option value="jeonse">Jeonse</option>
+        <option value="">전체</option>
+        <option value="sale">매매</option>
+        <option value="jeonse">전세</option>
       </select>
     </div>
     <div class="filter-group">
-      <label>Year</label>
+      <label>연도</label>
       <input type="number" id="tx-year" placeholder="2026" min="2000" max="2030" />
     </div>
     <div class="filter-group">
-      <label>Month</label>
+      <label>월</label>
       <input type="number" id="tx-month" placeholder="1-12" min="1" max="12" />
     </div>
     <div class="filter-group">
-      <label>Apt Name</label>
-      <input type="text" id="tx-apt" placeholder="Search..." />
+      <label>아파트명</label>
+      <input type="text" id="tx-apt" placeholder="검색..." />
     </div>
     <div class="filter-group">
-      <label>Sort</label>
+      <label>정렬</label>
       <select id="tx-sort">
-        <option value="deal_date_desc">Date (newest)</option>
-        <option value="price_desc">Price (high)</option>
-        <option value="price_asc">Price (low)</option>
-        <option value="area_desc">Area (large)</option>
+        <option value="deal_date_desc">최신순</option>
+        <option value="price_desc">가격 높은순</option>
+        <option value="price_asc">가격 낮은순</option>
+        <option value="area_desc">면적 넓은순</option>
       </select>
     </div>
     <div class="filter-group">
       <label>&nbsp;</label>
-      <button class="btn btn-primary btn-sm" onclick="loadTransactions(1)">Search</button>
+      <button class="btn btn-primary btn-sm" onclick="loadTransactions(1)">검색</button>
     </div>
   </div>
 
@@ -124,20 +124,20 @@
     <table>
       <thead>
         <tr>
-          <th>Date</th>
-          <th>Type</th>
-          <th>Region</th>
-          <th>Dong</th>
-          <th>Apartment</th>
-          <th style="text-align:right">Area (m²)</th>
-          <th style="text-align:right">Floor</th>
-          <th style="text-align:right">Price (만원)</th>
-          <th style="text-align:right">Deposit</th>
-          <th style="text-align:right">Rent</th>
+          <th>거래일</th>
+          <th>유형</th>
+          <th>지역코드</th>
+          <th>법정동</th>
+          <th>아파트</th>
+          <th style="text-align:right">면적 (m²)</th>
+          <th style="text-align:right">층</th>
+          <th style="text-align:right">거래가 (만원)</th>
+          <th style="text-align:right">보증금</th>
+          <th style="text-align:right">월세</th>
         </tr>
       </thead>
       <tbody id="tx-body">
-        <tr><td colspan="10" class="empty-msg">Click Search to load data</td></tr>
+        <tr><td colspan="10" class="empty-msg">검색 버튼을 눌러 데이터를 조회하세요</td></tr>
       </tbody>
     </table>
   </div>
@@ -148,28 +148,28 @@
 <div id="tab-statistics" class="tab-panel">
   <div class="filter-row">
     <div class="filter-group">
-      <label>Type</label>
+      <label>유형</label>
       <select id="st-type">
-        <option value="">All</option>
-        <option value="sale_index">Sale Index</option>
-        <option value="jeonse_index">Jeonse Index</option>
+        <option value="">전체</option>
+        <option value="sale_index">매매지수</option>
+        <option value="jeonse_index">전세지수</option>
       </select>
     </div>
     <div class="filter-group">
-      <label>Region</label>
-      <input type="text" id="st-region" placeholder="e.g. 서울" />
+      <label>지역</label>
+      <input type="text" id="st-region" placeholder="예: 서울" />
     </div>
     <div class="filter-group">
-      <label>Period From</label>
+      <label>시작 기간</label>
       <input type="text" id="st-from" placeholder="2025-01" />
     </div>
     <div class="filter-group">
-      <label>Period To</label>
+      <label>종료 기간</label>
       <input type="text" id="st-to" placeholder="2026-03" />
     </div>
     <div class="filter-group">
       <label>&nbsp;</label>
-      <button class="btn btn-primary btn-sm" onclick="loadStatistics(1)">Search</button>
+      <button class="btn btn-primary btn-sm" onclick="loadStatistics(1)">검색</button>
     </div>
   </div>
 
@@ -181,15 +181,15 @@
     <table>
       <thead>
         <tr>
-          <th>Period</th>
-          <th>Type</th>
-          <th>Region</th>
-          <th style="text-align:right">Index Value</th>
-          <th>Source</th>
+          <th>기간</th>
+          <th>유형</th>
+          <th>지역</th>
+          <th style="text-align:right">지수값</th>
+          <th>소스</th>
         </tr>
       </thead>
       <tbody id="st-body">
-        <tr><td colspan="5" class="empty-msg">Click Search to load data</td></tr>
+        <tr><td colspan="5" class="empty-msg">검색 버튼을 눌러 데이터를 조회하세요</td></tr>
       </tbody>
     </table>
   </div>
@@ -258,17 +258,17 @@
       const data = await apiFetch('/api/data/transactions?' + params);
       renderTransactions(data);
     } catch (e) {
-      showToast('Failed to load: ' + e.message, 'error');
+      showToast('로딩 실패: ' + e.message, 'error');
     }
   }
 
   function renderTransactions(data) {
     const tbody = document.getElementById('tx-body');
-    document.getElementById('tx-title').textContent = `Transactions (${data.total.toLocaleString()} total)`;
-    document.getElementById('tx-info').textContent = `Page ${data.page} / ${data.total_pages}`;
+    document.getElementById('tx-title').textContent = `실거래 (${data.total.toLocaleString()}건)`;
+    document.getElementById('tx-info').textContent = `${data.page} / ${data.total_pages} 페이지`;
 
     if (!data.items.length) {
-      tbody.innerHTML = '<tr><td colspan="10" class="empty-msg">No data found</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="empty-msg">데이터가 없습니다</td></tr>';
       document.getElementById('tx-pagination').innerHTML = '';
       return;
     }
@@ -313,17 +313,17 @@
       const data = await apiFetch('/api/data/statistics?' + params);
       renderStatistics(data);
     } catch (e) {
-      showToast('Failed to load: ' + e.message, 'error');
+      showToast('로딩 실패: ' + e.message, 'error');
     }
   }
 
   function renderStatistics(data) {
     const tbody = document.getElementById('st-body');
-    document.getElementById('st-title').textContent = `Price Statistics (${data.total.toLocaleString()} total)`;
-    document.getElementById('st-info').textContent = `Page ${data.page} / ${data.total_pages}`;
+    document.getElementById('st-title').textContent = `가격 지수 (${data.total.toLocaleString()}건)`;
+    document.getElementById('st-info').textContent = `${data.page} / ${data.total_pages} 페이지`;
 
     if (!data.items.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="empty-msg">No data found</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-msg">데이터가 없습니다</td></tr>';
       document.getElementById('st-pagination').innerHTML = '';
       return;
     }
@@ -347,7 +347,7 @@
     if (totalPages <= 1) { el.innerHTML = ''; return; }
 
     let html = '';
-    html += `<button class="page-btn" onclick="(${loadFn.name})(${current - 1})" ${current <= 1 ? 'disabled' : ''}>&#8592; Prev</button>`;
+    html += `<button class="page-btn" onclick="(${loadFn.name})(${current - 1})" ${current <= 1 ? 'disabled' : ''}>&#8592; 이전</button>`;
 
     const start = Math.max(1, current - 3);
     const end = Math.min(totalPages, current + 3);
@@ -362,7 +362,7 @@
     if (end < totalPages - 1) html += '<span style="color:var(--muted)">...</span>';
     if (end < totalPages) html += `<button class="page-btn" onclick="(${loadFn.name})(${totalPages})">${totalPages}</button>`;
 
-    html += `<button class="page-btn" onclick="(${loadFn.name})(${current + 1})" ${current >= totalPages ? 'disabled' : ''}>Next &#8594;</button>`;
+    html += `<button class="page-btn" onclick="(${loadFn.name})(${current + 1})" ${current >= totalPages ? 'disabled' : ''}>다음 &#8594;</button>`;
     el.innerHTML = html;
   }
 
