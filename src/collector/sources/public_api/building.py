@@ -6,8 +6,10 @@ Collects building registry data from the Korean government open API
 """
 import asyncio
 import logging
+import xml.etree.ElementTree as ET
 from datetime import datetime, date
 from decimal import Decimal, InvalidOperation
+from urllib.parse import urlencode
 
 import httpx
 from sqlalchemy.dialects.postgresql import insert
@@ -22,6 +24,38 @@ logger = logging.getLogger(__name__)
 _BASE_URL = "http://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo"
 _NUM_OF_ROWS = 100
 _MAX_RETRIES = 3
+
+
+def _xml_to_dict(xml_text: str) -> dict:
+    """Convert XML response text to a nested dict matching the JSON structure."""
+    root = ET.fromstring(xml_text)
+
+    def _node_to_obj(node):
+        children = list(node)
+        if not children:
+            return node.text or ""
+        result = {}
+        for child in children:
+            tag = child.tag
+            value = _node_to_obj(child)
+            if tag == "items":
+                # Always produce a list for item children
+                item_children = list(child)
+                if not item_children:
+                    result[tag] = {"item": []}
+                else:
+                    result[tag] = {"item": [_node_to_obj(ic) for ic in item_children]}
+            elif tag in result:
+                # Duplicate tag → convert to list
+                existing = result[tag]
+                if not isinstance(existing, list):
+                    result[tag] = [existing]
+                result[tag].append(value)
+            else:
+                result[tag] = value
+        return result
+
+    return {root.tag: _node_to_obj(root)}
 
 
 def _clean(value) -> str | None:
@@ -85,11 +119,21 @@ class BuildingCollector(BaseCollector):
             "type": "json",
         }
 
+        # Build URL manually to avoid double-encoding the serviceKey (contains / and ==)
+        params_copy = dict(params)
+        service_key = params_copy.pop("serviceKey")
+        query = f"serviceKey={service_key}&{urlencode(params_copy)}"
+        full_url = f"{_BASE_URL}?{query}"
+
         for attempt in range(_MAX_RETRIES):
             try:
-                response = await client.get(_BASE_URL, params=params, timeout=30.0)
+                response = await client.get(full_url, timeout=30.0)
                 response.raise_for_status()
-                return response.json()
+                content_type = response.headers.get("content-type", "")
+                if "json" in content_type or response.text.strip().startswith("{"):
+                    return response.json()
+                else:
+                    return _xml_to_dict(response.text)
             except (httpx.HTTPError, Exception) as exc:
                 if attempt == _MAX_RETRIES - 1:
                     raise

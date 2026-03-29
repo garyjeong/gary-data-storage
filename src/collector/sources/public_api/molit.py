@@ -5,6 +5,8 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import xml.etree.ElementTree as ET
+
 import httpx
 from sqlalchemy.dialects.postgresql import insert
 
@@ -79,6 +81,29 @@ def _parse_contract_date(value: Any):
         return None
 
 
+def _xml_to_dict(xml_text: str) -> dict:
+    """Parse MOLIT XML response into the same nested dict structure as JSON."""
+
+    def _elem_to_dict(elem: ET.Element) -> Any:
+        children = list(elem)
+        if not children:
+            return elem.text or ""
+
+        # Special case: <items> containing one or more <item> children
+        # Always return a list so downstream code works uniformly.
+        child_tags = [c.tag for c in children]
+        if elem.tag == "items" and all(t == "item" for t in child_tags):
+            return {"item": [_elem_to_dict(c) for c in children]}
+
+        result: dict = {}
+        for child in children:
+            result[child.tag] = _elem_to_dict(child)
+        return result
+
+    root = ET.fromstring(xml_text)
+    return {root.tag: _elem_to_dict(root)}
+
+
 async def _fetch_with_retry(
     client: httpx.AsyncClient,
     url: str,
@@ -105,13 +130,17 @@ async def _fetch_with_retry(
         try:
             response = await client.get(full_url)
             response.raise_for_status()
-            data = response.json()
+            content_type = response.headers.get("content-type", "")
+            if "json" in content_type or response.text.strip().startswith("{"):
+                data = response.json()
+            else:
+                data = _xml_to_dict(response.text)
             result_code = (
                 data.get("response", {})
                 .get("header", {})
                 .get("resultCode", "")
             )
-            if result_code != "00":
+            if result_code not in ("00", "000"):
                 result_msg = (
                     data.get("response", {})
                     .get("header", {})
@@ -219,9 +248,20 @@ async def _upsert_records(
     inserted = 0
     updated = 0
 
+    # Deduplicate within the batch — PostgreSQL rejects duplicate rows in a
+    # single INSERT ... ON CONFLICT statement.  Keep the last occurrence.
+    index_cols = _build_upsert_index_elements()
+
+    def _dedup(row_list: list[dict]) -> list[dict]:
+        seen: dict[tuple, int] = {}
+        for i, r in enumerate(row_list):
+            key = tuple(r.get(c) for c in index_cols)
+            seen[key] = i  # last wins
+        return [row_list[i] for i in sorted(seen.values())]
+
     # Split into rows that have deal_day (covered by partial unique index)
     # and those that do not.
-    rows_with_day = [r for r in rows if r.get("deal_day") is not None]
+    rows_with_day = _dedup([r for r in rows if r.get("deal_day") is not None])
     rows_without_day = [r for r in rows if r.get("deal_day") is None]
 
     async with async_session() as session:
@@ -274,6 +314,15 @@ async def _upsert_records(
     return inserted, updated
 
 
+def _get(item: dict, *keys) -> Any:
+    """Try multiple keys and return the first non-None value."""
+    for k in keys:
+        v = item.get(k)
+        if v is not None:
+            return v
+    return None
+
+
 class MolitSaleCollector(BaseCollector):
     """Collects apartment sale (매매) transaction data from MOLIT public API."""
 
@@ -282,26 +331,29 @@ class MolitSaleCollector(BaseCollector):
         return "molit_sale"
 
     def _parse_item(self, item: dict, region_code: str) -> dict:
-        """Normalize a single sale API item into an AptTransaction-compatible dict."""
+        """Normalize a single sale API item into an AptTransaction-compatible dict.
+
+        Handles both JSON (Korean keys) and XML (English keys) field names.
+        """
         return {
             "source": self.source_name,
             "transaction_type": "sale",
             "region_code": region_code,
-            "dong_name": _strip(item.get("법정동")),
-            "apt_name": _strip(item.get("아파트")) or "",
-            "exclusive_area": _parse_decimal(item.get("전용면적")),
-            "floor": _parse_int(item.get("층")),
-            "deal_amount": _parse_amount(item.get("거래금액")),
+            "dong_name": _strip(_get(item, "법정동", "umdNm")),
+            "apt_name": _strip(_get(item, "아파트", "aptNm")) or "",
+            "exclusive_area": _parse_decimal(_get(item, "전용면적", "excluUseAr")),
+            "floor": _parse_int(_get(item, "층", "floor")),
+            "deal_amount": _parse_amount(_get(item, "거래금액", "dealAmount")),
             "deposit": None,
             "monthly_rent": None,
-            "deal_year": _parse_int(item.get("년")),
-            "deal_month": _parse_int(item.get("월")),
-            "deal_day": _parse_int(item.get("일")),
-            "build_year": _parse_int(item.get("건축년도")),
-            "jibun": _strip(item.get("지번")),
-            "road_name": _strip(item.get("도로명")),
-            "cancel_deal_type": _strip(item.get("해제여부")),
-            "contract_date": _parse_contract_date(item.get("해제사유발생일")),
+            "deal_year": _parse_int(_get(item, "년", "dealYear")),
+            "deal_month": _parse_int(_get(item, "월", "dealMonth")),
+            "deal_day": _parse_int(_get(item, "일", "dealDay")),
+            "build_year": _parse_int(_get(item, "건축년도", "buildYear")),
+            "jibun": _strip(_get(item, "지번", "jibun")),
+            "road_name": _strip(_get(item, "도로명", "roadNm")),
+            "cancel_deal_type": _strip(_get(item, "해제여부", "cdealType")),
+            "contract_date": _parse_contract_date(_get(item, "해제사유발생일", "cdealDay")),
             "raw_data": item,
             "collected_at": datetime.now(),
         }
@@ -422,24 +474,27 @@ class MolitJeonseCollector(BaseCollector):
         return "molit_jeonse"
 
     def _parse_item(self, item: dict, region_code: str) -> dict:
-        """Normalize a single jeonse/rent API item into an AptTransaction-compatible dict."""
+        """Normalize a single jeonse/rent API item into an AptTransaction-compatible dict.
+
+        Handles both JSON (Korean keys) and XML (English keys) field names.
+        """
         return {
             "source": self.source_name,
             "transaction_type": "jeonse",
             "region_code": region_code,
-            "dong_name": _strip(item.get("법정동")),
-            "apt_name": _strip(item.get("아파트")) or "",
-            "exclusive_area": _parse_decimal(item.get("전용면적")),
-            "floor": _parse_int(item.get("층")),
+            "dong_name": _strip(_get(item, "법정동", "umdNm")),
+            "apt_name": _strip(_get(item, "아파트", "aptNm")) or "",
+            "exclusive_area": _parse_decimal(_get(item, "전용면적", "excluUseAr")),
+            "floor": _parse_int(_get(item, "층", "floor")),
             "deal_amount": None,
-            "deposit": _parse_amount(item.get("보증금액")),
-            "monthly_rent": _parse_amount(item.get("월세금액")),
-            "deal_year": _parse_int(item.get("년")),
-            "deal_month": _parse_int(item.get("월")),
-            "deal_day": _parse_int(item.get("일")),
-            "build_year": _parse_int(item.get("건축년도")),
-            "jibun": _strip(item.get("지번")),
-            "road_name": _strip(item.get("도로명")),
+            "deposit": _parse_amount(_get(item, "보증금액", "deposit")),
+            "monthly_rent": _parse_amount(_get(item, "월세금액", "monthlyRent")),
+            "deal_year": _parse_int(_get(item, "년", "dealYear")),
+            "deal_month": _parse_int(_get(item, "월", "dealMonth")),
+            "deal_day": _parse_int(_get(item, "일", "dealDay")),
+            "build_year": _parse_int(_get(item, "건축년도", "buildYear")),
+            "jibun": _strip(_get(item, "지번", "jibun")),
+            "road_name": _strip(_get(item, "도로명", "roadNm")),
             "cancel_deal_type": None,
             "contract_date": None,
             "raw_data": item,
