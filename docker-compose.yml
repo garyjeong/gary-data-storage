@@ -2,15 +2,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: realestate
-      POSTGRES_USER: collector
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-collector_pass}
+      POSTGRES_DB: ${DB_NAME:-collector}
+      POSTGRES_USER: ${DB_USER:-gary}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-wjdwhdans}
     ports:
       - "${DB_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U collector -d realestate"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-gary} -d ${DB_NAME:-collector}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -21,7 +21,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://collector:${DB_PASSWORD:-collector_pass}@postgres:5432/realestate
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-gary}:${DB_PASSWORD:-wjdwhdans}@postgres:5432/${DB_NAME:-collector}
       DATA_GO_KR_API_KEY: ${DATA_GO_KR_API_KEY:-}
       VWORLD_API_KEY: ${VWORLD_API_KEY:-}
       REB_API_KEY: ${REB_API_KEY:-}

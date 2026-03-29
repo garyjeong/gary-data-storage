@@ -1,104 +1,150 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — RE Admin{% endblock %}
+{% block title %}Dashboard{% endblock %}
 {% block nav_dashboard %}active{% endblock %}
+{% block topbar_title %}Dashboard{% endblock %}
+{% block topbar_actions %}
+  <span id="refresh-countdown" style="color:var(--text-muted);font-size:12px;"></span>
+  <button class="btn btn-primary btn-sm" onclick="document.getElementById('collect-modal').classList.add('open')">
+    Collect Now
+  </button>
+{% endblock %}
 
 {% block content %}
-<div class="page-header">
-  <h1 class="page-title">Dashboard</h1>
-  <div style="display:flex;gap:8px;align-items:center;">
-    <span id="refresh-countdown" style="color:var(--muted);font-size:12px;"></span>
-    <button class="btn btn-primary" id="collect-btn" onclick="triggerCollect()">
-      &#9654; Collect Now
-    </button>
-  </div>
-</div>
-
-<!-- Stats -->
-<div class="stats-grid">
+<!-- Stats Row -->
+<div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
   <div class="card">
-    <div class="card-title">Total Regions</div>
-    <div class="card-value">{{ total_regions }}</div>
+    <div class="card-title">Transactions</div>
+    <div class="card-value">{{ "{:,}".format(total_transactions) }}</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">
+      <span style="color:var(--danger);">Sale {{ "{:,}".format(sale_count) }}</span>
+      &middot;
+      <span style="color:var(--primary);">Jeonse {{ "{:,}".format(jeonse_count) }}</span>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Avg Sale Price</div>
+    <div class="card-value" style="font-size:22px;">
+      {% if sale_avg %}{{ "{:,}".format(sale_avg) }}<span style="font-size:13px;color:var(--text-muted);font-weight:400;"> M</span>{% else %}&mdash;{% endif %}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Price Statistics</div>
+    <div class="card-value">{{ "{:,}".format(total_statistics) }}</div>
   </div>
   <div class="card">
     <div class="card-title">Active Regions</div>
-    <div class="card-value" style="color:var(--success);">{{ active_regions }}</div>
-  </div>
-  <div class="card">
-    <div class="card-title">Scheduler</div>
-    <div class="card-value" style="font-size:18px;display:flex;align-items:center;gap:8px;margin-top:4px;">
-      {% if scheduler and scheduler.running %}
-        <span class="badge badge-green">&#9679; Running</span>
-      {% else %}
-        <span class="badge badge-red">&#9679; Stopped</span>
-      {% endif %}
+    <div class="card-value">
+      <span style="color:var(--success);">{{ active_regions }}</span>
+      <span style="font-size:14px;color:var(--text-muted);font-weight:400;">/ {{ total_regions }}</span>
     </div>
   </div>
   <div class="card">
-    <div class="card-title">Next Run</div>
-    <div class="card-value" style="font-size:16px;margin-top:4px;" id="next-run">
-      {% if scheduler and scheduler.next_run_time %}
-        {{ scheduler.next_run_time }}
+    <div class="card-title">Scheduler</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+      {% if scheduler and scheduler.running %}
+        <span class="badge badge-green">Running</span>
       {% else %}
-        —
+        <span class="badge badge-red">Stopped</span>
+      {% endif %}
+      {% if scheduler and scheduler.interval_minutes %}
+        <span style="font-size:12px;color:var(--text-muted);">{{ scheduler.interval_minutes|int }}min</span>
       {% endif %}
     </div>
   </div>
 </div>
 
-<!-- Recent Logs -->
-<div class="table-wrap">
-  <div class="table-header">
-    <span class="table-title">Recent Collection Logs</span>
-    <button class="btn btn-ghost btn-sm" onclick="loadLogs()">&#8635; Refresh</button>
-  </div>
-  <table id="logs-table">
-    <thead>
-      <tr>
-        <th>Time</th>
-        <th>Source</th>
-        <th>Region</th>
-        <th>Records</th>
-        <th>Duration</th>
-        <th>Status</th>
-        <th>Error</th>
-      </tr>
-    </thead>
-    <tbody id="logs-tbody">
-      {% if recent_logs %}
-        {% for log in recent_logs %}
+<!-- Two columns: Latest Transactions + Collection Logs -->
+<div class="grid-2" style="margin-bottom:24px;">
+  <!-- Latest Transactions -->
+  <div class="table-wrap">
+    <div class="table-header">
+      <span class="table-title">Latest Transactions</span>
+      <a href="/data" class="btn btn-ghost btn-sm" style="cursor:pointer;">View All</a>
+    </div>
+    <table>
+      <thead>
         <tr>
-          <td style="white-space:nowrap;color:var(--muted);font-size:12px;">
-            {{ log.started_at.strftime('%m-%d %H:%M:%S') if log.started_at else '—' }}
-          </td>
-          <td><span class="badge badge-blue">{{ log.source or '—' }}</span></td>
-          <td>{{ log.region_code or '—' }}</td>
-          <td style="font-weight:600;">{{ log.records_collected or 0 }}</td>
-          <td style="color:var(--muted);font-size:12px;">
-            {% if log.started_at and log.finished_at %}
-              {{ ((log.finished_at - log.started_at).total_seconds() | round(1)) }}s
-            {% else %}—{% endif %}
-          </td>
-          <td>
-            {% if log.status == 'success' %}
-              <span class="badge badge-green">&#10003; success</span>
-            {% elif log.status == 'error' %}
-              <span class="badge badge-red">&#10007; error</span>
-            {% elif log.status == 'running' %}
-              <span class="badge badge-yellow">&#8987; running</span>
-            {% else %}
-              <span class="badge badge-gray">{{ log.status or '—' }}</span>
-            {% endif %}
-          </td>
-          <td style="color:var(--danger);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-            {{ log.error_message or '' }}
-          </td>
+          <th>Date</th>
+          <th>Type</th>
+          <th>Apartment</th>
+          <th style="text-align:right">Price</th>
         </tr>
-        {% endfor %}
-      {% else %}
-        <tr class="empty-row"><td colspan="7">No logs yet</td></tr>
-      {% endif %}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {% if latest_transactions %}
+          {% for tx in latest_transactions %}
+          <tr>
+            <td style="font-size:12px;color:var(--text-muted);white-space:nowrap;">
+              {{ tx.deal_year }}.{{ "%02d"|format(tx.deal_month) }}{% if tx.deal_day %}.{{ "%02d"|format(tx.deal_day) }}{% endif %}
+            </td>
+            <td>
+              {% if tx.transaction_type == 'sale' %}
+                <span class="badge badge-red">Sale</span>
+              {% else %}
+                <span class="badge badge-blue">Jeonse</span>
+              {% endif %}
+            </td>
+            <td>
+              <div style="font-weight:600;font-size:13px;">{{ tx.apt_name }}</div>
+              <div style="font-size:11px;color:var(--text-muted);">{{ tx.dong_name or '' }} &middot; {{ tx.exclusive_area or '' }}m&sup2;</div>
+            </td>
+            <td class="number" style="font-weight:600;white-space:nowrap;">
+              {% if tx.transaction_type == 'sale' and tx.deal_amount %}
+                <span style="color:var(--danger);">{{ "{:,}".format(tx.deal_amount) }}</span>
+              {% elif tx.deposit %}
+                <span style="color:var(--primary);">{{ "{:,}".format(tx.deposit) }}</span>
+              {% else %}&mdash;{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:32px;">No transaction data yet</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Collection Logs -->
+  <div class="table-wrap">
+    <div class="table-header">
+      <span class="table-title">Recent Collection Logs</span>
+      <button class="btn btn-ghost btn-sm" onclick="loadLogs()" style="cursor:pointer;">Refresh</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Source</th>
+          <th style="text-align:right">Records</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="logs-tbody">
+        {% if recent_logs %}
+          {% for log in recent_logs %}
+          <tr>
+            <td style="font-size:12px;color:var(--text-muted);white-space:nowrap;">
+              {{ log.started_at.strftime('%m-%d %H:%M') if log.started_at else '—' }}
+            </td>
+            <td><span class="badge badge-blue" style="font-size:11px;">{{ log.source or '—' }}</span></td>
+            <td class="number" style="font-weight:600;">{{ log.records_collected or 0 }}</td>
+            <td>
+              {% if log.status == 'success' %}
+                <span class="badge badge-green">OK</span>
+              {% elif log.status == 'error' %}
+                <span class="badge badge-red" title="{{ log.error_message or '' }}" style="cursor:default;">Err</span>
+              {% else %}
+                <span class="badge badge-gray">{{ log.status or '—' }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:32px;">No logs yet</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <!-- Collect Modal -->
@@ -107,15 +153,15 @@
     <div class="modal-title">Manual Collection</div>
     <div class="form-group">
       <label>Sources (comma-separated, blank = all)</label>
-      <input type="text" id="collect-sources" placeholder="e.g. naver,kb" />
+      <input type="text" id="collect-sources" placeholder="e.g. molit_sale, naver" />
     </div>
     <div class="form-group">
       <label>Region codes (comma-separated, blank = all)</label>
-      <input type="text" id="collect-regions" placeholder="e.g. 11110,11140" />
+      <input type="text" id="collect-regions" placeholder="e.g. 11680, 11650" />
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('collect-modal')">Cancel</button>
-      <button class="btn btn-primary" onclick="submitCollect()">&#9654; Start</button>
+      <button class="btn btn-primary" id="collect-submit" onclick="submitCollect()">Start Collection</button>
     </div>
   </div>
 </div>
@@ -123,45 +169,33 @@
 
 {% block scripts %}
 <script>
-  // ── Auto-refresh ──
   let countdown = 30;
   const countdownEl = document.getElementById("refresh-countdown");
   function tick() {
-    countdownEl.textContent = `Auto-refresh in ${countdown}s`;
-    if (--countdown <= 0) {
-      loadLogs();
-      countdown = 30;
-    }
+    countdownEl.textContent = `Refresh ${countdown}s`;
+    if (--countdown <= 0) { loadLogs(); countdown = 30; }
   }
   setInterval(tick, 1000);
 
-  // ── Logs ──
   async function loadLogs() {
     try {
-      const logs = await apiFetch("/api/logs?limit=20");
+      const logs = await apiFetch("/api/logs?limit=15");
       const tbody = document.getElementById("logs-tbody");
       if (!logs.length) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No logs yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:32px;">No logs yet</td></tr>';
         return;
       }
       tbody.innerHTML = logs.map(log => {
-        const time = log.started_at ? log.started_at.replace("T", " ").slice(5, 19) : "—";
-        const dur = (log.started_at && log.finished_at)
-          ? ((new Date(log.finished_at) - new Date(log.started_at)) / 1000).toFixed(1) + "s"
-          : "—";
-        const statusBadge = {
-          success: '<span class="badge badge-green">&#10003; success</span>',
-          error:   '<span class="badge badge-red">&#10007; error</span>',
-          running: '<span class="badge badge-yellow">&#8987; running</span>',
+        const time = log.started_at ? log.started_at.replace("T", " ").slice(5, 16) : "—";
+        const st = {
+          success: '<span class="badge badge-green">OK</span>',
+          error: `<span class="badge badge-red" title="${(log.error_message||'').replace(/"/g,'&quot;')}" style="cursor:default;">Err</span>`,
         }[log.status] || `<span class="badge badge-gray">${log.status || "—"}</span>`;
         return `<tr>
-          <td style="white-space:nowrap;color:var(--muted);font-size:12px;">${time}</td>
-          <td><span class="badge badge-blue">${log.source || "—"}</span></td>
-          <td>${log.region_code || "—"}</td>
-          <td style="font-weight:600;">${log.records_collected ?? 0}</td>
-          <td style="color:var(--muted);font-size:12px;">${dur}</td>
-          <td>${statusBadge}</td>
-          <td style="color:var(--danger);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${log.error_message || ""}</td>
+          <td style="font-size:12px;color:var(--text-muted);white-space:nowrap;">${time}</td>
+          <td><span class="badge badge-blue" style="font-size:11px;">${log.source || "—"}</span></td>
+          <td class="number" style="font-weight:600;">${log.records_collected ?? 0}</td>
+          <td>${st}</td>
         </tr>`;
       }).join("");
     } catch (e) {
@@ -169,41 +203,25 @@
     }
   }
 
-  // ── Collect ──
-  function triggerCollect() {
-    document.getElementById("collect-modal").classList.add("open");
-  }
-  function closeModal(id) {
-    document.getElementById(id).classList.remove("open");
-  }
-
   async function submitCollect() {
     const sourcesRaw = document.getElementById("collect-sources").value.trim();
     const regionsRaw = document.getElementById("collect-regions").value.trim();
     const sources = sourcesRaw ? sourcesRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
     const region_codes = regionsRaw ? regionsRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
-
+    const btn = document.getElementById("collect-submit");
     try {
-      const btn = document.querySelector("#collect-modal .btn-primary");
-      btn.disabled = true;
-      btn.textContent = "Starting…";
-      await apiFetch("/api/collect", {
-        method: "POST",
-        body: JSON.stringify({ sources, region_codes }),
-      });
+      btn.disabled = true; btn.textContent = "Starting...";
+      await apiFetch("/api/collect", { method: "POST", body: JSON.stringify({ sources, region_codes }) });
       showToast("Collection started!", "success");
       closeModal("collect-modal");
       setTimeout(loadLogs, 2000);
     } catch (e) {
       showToast("Error: " + e.message, "error");
     } finally {
-      const btn = document.querySelector("#collect-modal .btn-primary");
-      btn.disabled = false;
-      btn.textContent = "▶ Start";
+      btn.disabled = false; btn.textContent = "Start Collection";
     }
   }
 
-  // close modal on backdrop click
   document.getElementById("collect-modal").addEventListener("click", function(e) {
     if (e.target === this) closeModal("collect-modal");
   });

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pathlib import Path
 
 from src.db.connection import get_db
-from src.db.models import Region, Schedule, CollectionLog
+from src.db.models import Region, Schedule, CollectionLog, AptTransaction, PriceStatistic
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -31,6 +31,32 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
 
     scheduler_status = get_scheduler_status()
 
+    # Data summary
+    total_transactions = await db.scalar(select(func.count(AptTransaction.id))) or 0
+    total_statistics = await db.scalar(select(func.count(PriceStatistic.id))) or 0
+
+    sale_count = await db.scalar(
+        select(func.count(AptTransaction.id)).where(AptTransaction.transaction_type == "sale")
+    ) or 0
+    jeonse_count = await db.scalar(
+        select(func.count(AptTransaction.id)).where(AptTransaction.transaction_type == "jeonse")
+    ) or 0
+
+    sale_avg = await db.scalar(
+        select(func.round(func.avg(AptTransaction.deal_amount))).where(
+            AptTransaction.transaction_type == "sale",
+            AptTransaction.deal_amount.isnot(None),
+        )
+    )
+
+    # Latest transactions (top 10)
+    latest_tx = await db.execute(
+        select(AptTransaction)
+        .order_by(desc(AptTransaction.deal_year), desc(AptTransaction.deal_month), desc(AptTransaction.deal_day))
+        .limit(10)
+    )
+    latest_transactions = latest_tx.scalars().all()
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -39,6 +65,12 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
             "active_regions": active_regions,
             "recent_logs": recent_logs,
             "scheduler": scheduler_status,
+            "total_transactions": total_transactions,
+            "total_statistics": total_statistics,
+            "sale_count": sale_count,
+            "jeonse_count": jeonse_count,
+            "sale_avg": int(sale_avg) if sale_avg else 0,
+            "latest_transactions": latest_transactions,
         },
     )
 
