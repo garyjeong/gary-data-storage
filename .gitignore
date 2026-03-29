@@ -54,6 +54,10 @@ pgdata/
 *.log
 logs/
 
+# Screenshots (Playwright)
+*.png
+*.jpeg
+
 # OS
 .DS_Store
 Thumbs.db
