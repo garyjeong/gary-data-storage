@@ -210,6 +210,14 @@
   /* ── Formatting ── */
   function fmtPrice(val) {
     if (val == null) return '-';
+    // 만원 단위 → 억/만 표시
+    const abs = Math.abs(val);
+    if (abs >= 10000) {
+      const eok = Math.floor(abs / 10000);
+      const man = abs % 10000;
+      if (man === 0) return eok.toLocaleString('ko-KR') + '억';
+      return eok.toLocaleString('ko-KR') + '억 ' + man.toLocaleString('ko-KR');
+    }
     return val.toLocaleString('ko-KR');
   }
 

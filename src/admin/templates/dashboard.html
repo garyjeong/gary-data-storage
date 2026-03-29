@@ -9,6 +9,14 @@
   </button>
 {% endblock %}
 
+{% macro fmt_manwon(val) -%}
+  {%- if val >= 10000 -%}
+    {{ "{:,}".format(val // 10000) }}억{% if val % 10000 %} {{ "{:,}".format(val % 10000) }}{% endif %}
+  {%- else -%}
+    {{ "{:,}".format(val) }}
+  {%- endif -%}
+{%- endmacro %}
+
 {% block content %}
 <!-- Stats Row -->
 <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
@@ -24,7 +32,7 @@
   <div class="card">
     <div class="card-title">매매 평균가</div>
     <div class="card-value" style="font-size:22px;">
-      {% if sale_avg %}{{ "{:,}".format(sale_avg) }}<span style="font-size:13px;color:var(--text-muted);font-weight:400;"> 만원</span>{% else %}&mdash;{% endif %}
+      {% if sale_avg %}{{ fmt_manwon(sale_avg) }}<span style="font-size:13px;color:var(--text-muted);font-weight:400;"> 만원</span>{% else %}&mdash;{% endif %}
     </div>
   </div>
   <div class="card">
@@ -90,9 +98,9 @@
             </td>
             <td class="number" style="font-weight:600;white-space:nowrap;">
               {% if tx.transaction_type == 'sale' and tx.deal_amount %}
-                <span style="color:var(--danger);">{{ "{:,}".format(tx.deal_amount) }}</span>
+                <span style="color:var(--danger);">{{ fmt_manwon(tx.deal_amount) }}</span>
               {% elif tx.deposit %}
-                <span style="color:var(--primary);">{{ "{:,}".format(tx.deposit) }}</span>
+                <span style="color:var(--primary);">{{ fmt_manwon(tx.deposit) }}</span>
               {% else %}&mdash;{% endif %}
             </td>
           </tr>
