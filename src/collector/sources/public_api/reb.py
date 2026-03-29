@@ -1,8 +1,12 @@
 """
 Korea Real Estate Board (한국부동산원) Statistics Collector
 
-Collects apartment price index data (매매/전세) from the Korean government
-open API (apis.data.go.kr - B553547/real-estate-info/getRealEstatePriceIndex).
+Collects apartment price index data (매매/전세) from the REB R-ONE open API
+(www.reb.or.kr/r-one/openapi/).
+
+The REB API returns ALL regions in a single response (not per-region), so
+this collector fetches once per collection cycle and caches the result to
+avoid redundant API calls when the manager iterates over 56 regions.
 """
 import asyncio
 import logging
@@ -19,24 +23,25 @@ from src.db.models import PriceStatistic
 
 logger = logging.getLogger(__name__)
 
-_BASE_URL = (
-    "http://apis.data.go.kr/B553547/real-estate-info/getRealEstatePriceIndex"
-)
-_NUM_OF_ROWS = 100
+# ---------------------------------------------------------------------------
+# R-ONE API configuration
+# ---------------------------------------------------------------------------
+
+_BASE_URL = "https://www.reb.or.kr/r-one/openapi/SttsApiTblData.do"
+
 _MAX_RETRIES = 3
+_RETRY_BACKOFF = [2, 4, 8]
+_REQUEST_TIMEOUT = 30
 
-# tradeType codes
-_TRADE_SALE = "01"
-_TRADE_JEONSE = "02"
-
-# stat_type values stored in DB
-_STAT_SALE = "sale_index"
-_STAT_JEONSE = "jeonse_index"
-
-_TRADE_TYPE_MAP = {
-    _TRADE_SALE: _STAT_SALE,
-    _TRADE_JEONSE: _STAT_JEONSE,
+# STATBL_ID values for apartment price indexes
+_STAT_TABLES = {
+    "sale_index": "A_2024_00178",      # 아파트 매매가격지수
+    "jeonse_index": "A_2024_00182",    # 아파트 전세가격지수
 }
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def _clean(value) -> str | None:
@@ -55,7 +60,7 @@ def _to_decimal(value) -> Decimal | None:
 
 
 def _period_from_yyyymm(raw: str | None) -> str | None:
-    """Convert 'YYYYMM' to 'YYYY-MM'. Returns None if parsing fails."""
+    """Convert 'YYYYMM' to 'YYYY-MM'."""
     v = _clean(raw)
     if not v or len(v) < 6:
         return None
@@ -65,161 +70,29 @@ def _period_from_yyyymm(raw: str | None) -> str | None:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Collector
+# ---------------------------------------------------------------------------
+
+
 class RebCollector(BaseCollector):
-    """Collects Korea Real Estate Board price index statistics from data.go.kr."""
+    """Collects Korea Real Estate Board price index statistics from reb.or.kr.
+
+    The R-ONE API returns all regions in one response, so we fetch once and
+    cache the result for the current collection cycle.  Subsequent calls with
+    different region_codes within the same cycle return immediately.
+    """
+
+    def __init__(self):
+        self._last_collected_cycle: str | None = None  # "YYYYMM" of last fetch
 
     @property
     def source_name(self) -> str:
         return "reb"
 
-    async def _fetch_page(
-        self,
-        client: httpx.AsyncClient,
-        region_code: str,
-        start_date: str,
-        end_date: str,
-        trade_type: str,
-        page_no: int,
-    ) -> dict:
-        """Fetch a single page with retry + exponential backoff."""
-        params = {
-            "serviceKey": settings.reb_api_key,
-            "regionCode": region_code,
-            "startDate": start_date,
-            "endDate": end_date,
-            "tradeType": trade_type,
-            "houseType": "01",  # 아파트
-            "pageNo": str(page_no),
-            "numOfRows": str(_NUM_OF_ROWS),
-            "type": "json",
-        }
-
-        for attempt in range(_MAX_RETRIES):
-            try:
-                response = await client.get(_BASE_URL, params=params, timeout=30.0)
-                response.raise_for_status()
-                return response.json()
-            except (httpx.HTTPError, Exception) as exc:
-                if attempt == _MAX_RETRIES - 1:
-                    raise
-                wait = 2 ** attempt
-                logger.warning(
-                    "reb fetch attempt %d/%d failed (trade=%s, %s); retrying in %ds",
-                    attempt + 1,
-                    _MAX_RETRIES,
-                    trade_type,
-                    exc,
-                    wait,
-                )
-                await asyncio.sleep(wait)
-
-    def _extract_items(self, data: dict) -> list[dict]:
-        """Safely extract item list from nested response structure."""
-        try:
-            items = data["response"]["body"]["items"]["item"]
-            if isinstance(items, dict):
-                return [items]
-            return items or []
-        except (KeyError, TypeError):
-            return []
-
-    def _total_count(self, data: dict) -> int:
-        try:
-            return int(data["response"]["body"]["totalCount"])
-        except (KeyError, TypeError, ValueError):
-            return 0
-
-    def _parse_record(
-        self,
-        item: dict,
-        region_code: str,
-        trade_type: str,
-    ) -> dict | None:
-        """Parse a single API item into a DB-ready dict. Returns None to skip."""
-        try:
-            region_name = _clean(
-                item.get("region_nm")
-                or item.get("regionNm")
-                or item.get("regionName")
-                or region_code
-            )
-
-            date_raw = (
-                item.get("date")
-                or item.get("stdMt")   # alternate key seen in some responses
-                or item.get("baseDate")
-            )
-            period = _period_from_yyyymm(_clean(date_raw))
-            if not period:
-                logger.debug("Skipping reb record: unparseable date '%s'", date_raw)
-                return None
-
-            index_raw = (
-                item.get("price_index")
-                or item.get("priceIndex")
-                or item.get("index")
-            )
-            value = _to_decimal(index_raw)
-
-            stat_type = _TRADE_TYPE_MAP.get(trade_type, _STAT_SALE)
-
-            # base_date may be provided separately or derived from the period
-            base_date_raw = _clean(item.get("base_date") or item.get("baseDate"))
-
-            return {
-                "source": "reb",
-                "stat_type": stat_type,
-                "region_code": region_code,
-                "region_name": region_name,
-                "period": period,
-                "value": value,
-                "base_date": base_date_raw,
-                "raw_data": item,
-            }
-        except Exception as exc:
-            logger.debug("Skipping reb record due to parse error: %s", exc)
-            return None
-
-    async def _collect_trade_type(
-        self,
-        client: httpx.AsyncClient,
-        region_code: str,
-        start_date: str,
-        end_date: str,
-        trade_type: str,
-    ) -> list[dict]:
-        """Fetch all pages for one trade type and return parsed records."""
-        records: list[dict] = []
-
-        try:
-            first_page = await self._fetch_page(
-                client, region_code, start_date, end_date, trade_type, 1
-            )
-            total_count = self._total_count(first_page)
-            for item in self._extract_items(first_page):
-                parsed = self._parse_record(item, region_code, trade_type)
-                if parsed:
-                    records.append(parsed)
-
-            total_pages = max(1, (total_count + _NUM_OF_ROWS - 1) // _NUM_OF_ROWS)
-            for page_no in range(2, total_pages + 1):
-                page_data = await self._fetch_page(
-                    client, region_code, start_date, end_date, trade_type, page_no
-                )
-                for item in self._extract_items(page_data):
-                    parsed = self._parse_record(item, region_code, trade_type)
-                    if parsed:
-                        records.append(parsed)
-
-        except Exception as exc:
-            logger.warning(
-                "reb trade_type=%s failed for region %s: %s",
-                trade_type,
-                region_code,
-                exc,
-            )
-
-        return records
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     async def collect(self, region_code: str, **params) -> CollectionResult:
         started_at = datetime.now()
@@ -229,29 +102,39 @@ class RebCollector(BaseCollector):
             started_at=started_at,
         )
 
-        # Default: collect from one year ago to current month
-        now = datetime.now()
-        default_end = now.strftime("%Y%m")
-        default_start_year = now.year - 1
-        default_start = f"{default_start_year}{now.strftime('%m')}"
+        current_cycle = datetime.now().strftime("%Y%m%d%H")
 
-        start_date: str = params.get("start_date", default_start)
-        end_date: str = params.get("end_date", default_end)
+        # Skip if already collected in this cycle (avoid 56 duplicate calls)
+        if self._last_collected_cycle == current_cycle:
+            result.status = "success"
+            result.duration_seconds = 0.0
+            return result
+
+        now = datetime.now()
+        end_period = now.strftime("%Y%m")
+        start_year = now.year - 1
+        start_period = f"{start_year}{now.strftime('%m')}"
+
+        start_period = params.get("start_period", start_period)
+        end_period = params.get("end_period", end_period)
+
+        logger.info(
+            "[reb] Starting collection: period=%s~%s",
+            start_period,
+            end_period,
+        )
 
         try:
-            async with httpx.AsyncClient() as client:
-                # Collect sale index and jeonse index concurrently
-                sale_task = self._collect_trade_type(
-                    client, region_code, start_date, end_date, _TRADE_SALE
-                )
-                jeonse_task = self._collect_trade_type(
-                    client, region_code, start_date, end_date, _TRADE_JEONSE
-                )
-                sale_records, jeonse_records = await asyncio.gather(
-                    sale_task, jeonse_task
-                )
+            all_records: list[dict] = []
 
-            all_records = sale_records + jeonse_records
+            async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+                for stat_type, statbl_id in _STAT_TABLES.items():
+                    records = await self._fetch_stat_table(
+                        client, statbl_id, stat_type, start_period, end_period
+                    )
+                    all_records.extend(records)
+                    await asyncio.sleep(1)  # polite delay between requests
+
             result.records_collected = len(all_records)
 
             if all_records:
@@ -259,74 +142,256 @@ class RebCollector(BaseCollector):
                 result.records_inserted = inserted
                 result.records_updated = updated
 
-        except Exception as exc:
-            logger.error(
-                "RebCollector failed for region %s: %s", region_code, exc
+            result.status = "success"
+            self._last_collected_cycle = current_cycle
+
+            logger.info(
+                "[reb] Done: collected=%d inserted=%d updated=%d duration=%.2fs",
+                result.records_collected,
+                result.records_inserted,
+                result.records_updated,
+                (datetime.now() - started_at).total_seconds(),
             )
+
+        except Exception as exc:
+            logger.error("[reb] Collection failed: %s", exc)
             result.status = "error"
             result.error_message = str(exc)
 
         result.duration_seconds = (datetime.now() - started_at).total_seconds()
         return result
 
-    async def _upsert_statistics(self, records: list[dict]) -> tuple[int, int]:
-        """Upsert price statistic records; returns (inserted, updated) counts."""
-        inserted = 0
-        updated = 0
-
-        async with async_session() as session:
-            async with session.begin():
-                for record in records:
-                    stmt = (
-                        insert(PriceStatistic)
-                        .values(
-                            source=record["source"],
-                            stat_type=record["stat_type"],
-                            region_code=record["region_code"],
-                            region_name=record["region_name"],
-                            period=record["period"],
-                            value=record["value"],
-                            base_date=record["base_date"],
-                            raw_data=record["raw_data"],
-                        )
-                        .on_conflict_do_update(
-                            constraint="uq_price_statistics_key",
-                            set_={
-                                "value": record["value"],
-                                "region_code": record["region_code"],
-                                "base_date": record["base_date"],
-                                "raw_data": record["raw_data"],
-                            },
-                        )
-                    )
-                    result_proxy = await session.execute(stmt)
-                    if result_proxy.rowcount > 0:
-                        inserted += 1
-                    else:
-                        updated += 1
-
-        return inserted, updated
-
     async def health_check(self) -> bool:
-        """Verify that the REB price index API is reachable."""
+        """Verify REB R-ONE API is reachable."""
         try:
-            now = datetime.now()
-            period = now.strftime("%Y%m")
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=10) as client:
                 params = {
-                    "serviceKey": settings.reb_api_key,
-                    "regionCode": "11",  # Seoul
-                    "startDate": period,
-                    "endDate": period,
-                    "tradeType": _TRADE_SALE,
-                    "houseType": "01",
-                    "pageNo": "1",
-                    "numOfRows": "1",
-                    "type": "json",
+                    "KEY": settings.reb_api_key,
+                    "Type": "json",
+                    "STATBL_ID": _STAT_TABLES["sale_index"],
+                    "DTACYCLE_CD": "MM",
+                    "WRTTIME_IDTFR_ID": datetime.now().strftime("%Y%m"),
                 }
-                response = await client.get(_BASE_URL, params=params, timeout=10.0)
-                response.raise_for_status()
-                return True
+                resp = await client.get(_BASE_URL, params=params)
+                return resp.status_code == 200
         except Exception as exc:
-            logger.warning("RebCollector health check failed: %s", exc)
+            logger.warning("[reb] health_check failed: %s", exc)
             return False
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    async def _fetch_stat_table(
+        self,
+        client: httpx.AsyncClient,
+        statbl_id: str,
+        stat_type: str,
+        start_period: str,
+        end_period: str,
+    ) -> list[dict]:
+        """Fetch all monthly data for a stat table across the given period range.
+
+        The R-ONE API accepts WRTTIME_IDTFR_ID for a single month.
+        We iterate month by month from start to end.
+        """
+        records: list[dict] = []
+        periods = self._generate_periods(start_period, end_period)
+
+        for period_yyyymm in periods:
+            items = await self._fetch_period(client, statbl_id, period_yyyymm)
+            for item in items:
+                parsed = self._parse_record(item, stat_type, period_yyyymm)
+                if parsed:
+                    records.append(parsed)
+            # Small delay between month requests
+            if len(periods) > 1:
+                await asyncio.sleep(0.5)
+
+        logger.info(
+            "[reb] Fetched %d records for %s (%s~%s)",
+            len(records),
+            stat_type,
+            start_period,
+            end_period,
+        )
+        return records
+
+    async def _fetch_period(
+        self,
+        client: httpx.AsyncClient,
+        statbl_id: str,
+        period_yyyymm: str,
+    ) -> list[dict]:
+        """Fetch data for a single period with retry."""
+        params = {
+            "KEY": settings.reb_api_key,
+            "Type": "json",
+            "STATBL_ID": statbl_id,
+            "DTACYCLE_CD": "MM",
+            "WRTTIME_IDTFR_ID": period_yyyymm,
+        }
+
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRIES):
+            try:
+                resp = await client.get(_BASE_URL, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                return self._extract_items(data)
+            except (httpx.HTTPError, ValueError, KeyError) as exc:
+                last_exc = exc
+                if attempt < _MAX_RETRIES - 1:
+                    wait = _RETRY_BACKOFF[attempt]
+                    logger.warning(
+                        "[reb] Fetch failed (attempt %d/%d) for %s/%s: %s, retrying in %ds",
+                        attempt + 1,
+                        _MAX_RETRIES,
+                        statbl_id,
+                        period_yyyymm,
+                        exc,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+
+        logger.error(
+            "[reb] All %d attempts failed for %s/%s: %s",
+            _MAX_RETRIES,
+            statbl_id,
+            period_yyyymm,
+            last_exc,
+        )
+        return []
+
+    def _extract_items(self, data: dict) -> list[dict]:
+        """Extract the data rows from REB JSON response.
+
+        R-ONE response shape:
+        {
+            "SttsApiTblData": [
+                {"head": [{"list_total_count": N}, {"RESULT": {"CODE": "INFO-000", ...}}]},
+                {"row": [{...}, {...}, ...]}
+            ]
+        }
+        """
+        try:
+            svc = data.get("SttsApiTblData", [])
+            if not isinstance(svc, list) or len(svc) < 2:
+                return []
+
+            # Check result code
+            head = svc[0].get("head", [])
+            if len(head) >= 2:
+                result_info = head[1].get("RESULT", {})
+                code = result_info.get("CODE", "")
+                if code != "INFO-000":
+                    logger.warning("[reb] API returned code=%s: %s", code, result_info.get("MESSAGE", ""))
+                    return []
+
+            rows = svc[1].get("row", [])
+            return rows if isinstance(rows, list) else []
+
+        except (KeyError, TypeError, IndexError) as exc:
+            logger.warning("[reb] Failed to extract items: %s", exc)
+            return []
+
+    def _parse_record(
+        self,
+        item: dict,
+        stat_type: str,
+        period_yyyymm: str,
+    ) -> dict | None:
+        """Parse a single REB data row into a DB-ready dict."""
+        try:
+            region_name = _clean(
+                item.get("CLS_NM")
+                or item.get("ITEM_NM1")
+                or item.get("region_nm")
+            )
+            if not region_name:
+                return None
+
+            period = _period_from_yyyymm(period_yyyymm)
+            if not period:
+                return None
+
+            value = _to_decimal(
+                item.get("DTA_VAL")
+                or item.get("STTS_VAL")
+                or item.get("price_index")
+            )
+
+            return {
+                "source": "reb",
+                "stat_type": stat_type,
+                "region_code": None,  # REB uses region names, not codes
+                "region_name": region_name,
+                "period": period,
+                "value": value,
+                "base_date": _clean(item.get("WRTTIME_IDTFR_ID")),
+                "raw_data": item,
+            }
+        except Exception as exc:
+            logger.debug("[reb] Skipping record: %s", exc)
+            return None
+
+    async def _upsert_statistics(self, records: list[dict]) -> tuple[int, int]:
+        """Upsert price statistic records; returns (inserted, updated)."""
+        if not records:
+            return 0, 0
+
+        # Deduplicate within batch (same source + stat_type + region_name + period)
+        seen: dict[tuple, int] = {}
+        for i, r in enumerate(records):
+            key = (r["source"], r["stat_type"], r["region_name"], r["period"])
+            seen[key] = i
+        deduped = [records[i] for i in sorted(seen.values())]
+
+        inserted = 0
+        async with async_session() as session:
+            for record in deduped:
+                stmt = (
+                    insert(PriceStatistic)
+                    .values(
+                        source=record["source"],
+                        stat_type=record["stat_type"],
+                        region_code=record["region_code"],
+                        region_name=record["region_name"],
+                        period=record["period"],
+                        value=record["value"],
+                        base_date=record["base_date"],
+                        raw_data=record["raw_data"],
+                    )
+                    .on_conflict_do_update(
+                        constraint="uq_price_statistics_key",
+                        set_={
+                            "value": record["value"],
+                            "region_code": record["region_code"],
+                            "base_date": record["base_date"],
+                            "raw_data": record["raw_data"],
+                        },
+                    )
+                )
+                await session.execute(stmt)
+                inserted += 1
+            await session.commit()
+
+        return inserted, 0
+
+    @staticmethod
+    def _generate_periods(start_yyyymm: str, end_yyyymm: str) -> list[str]:
+        """Generate list of YYYYMM strings from start to end (inclusive)."""
+        periods: list[str] = []
+        try:
+            sy, sm = int(start_yyyymm[:4]), int(start_yyyymm[4:6])
+            ey, em = int(end_yyyymm[:4]), int(end_yyyymm[4:6])
+            y, m = sy, sm
+            while (y, m) <= (ey, em):
+                periods.append(f"{y}{m:02d}")
+                m += 1
+                if m > 12:
+                    m = 1
+                    y += 1
+        except (ValueError, IndexError):
+            logger.warning("[reb] Invalid period range: %s ~ %s", start_yyyymm, end_yyyymm)
+        return periods
