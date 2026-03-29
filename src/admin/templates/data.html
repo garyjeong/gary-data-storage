@@ -1,0 +1,371 @@
+{% extends "base.html" %}
+{% block title %}Data Viewer — RE Admin{% endblock %}
+{% block nav_data %}active{% endblock %}
+
+{% block extra_head %}
+<style>
+  .tab-bar { display: flex; gap: 4px; margin-bottom: 20px; }
+  .tab-btn {
+    padding: 8px 18px; border-radius: var(--radius); border: 1px solid var(--border);
+    background: var(--surface); font-size: 13px; font-weight: 600; cursor: pointer;
+    color: var(--muted); transition: all .15s;
+  }
+  .tab-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  .filter-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin-bottom: 16px; }
+  .filter-group { display: flex; flex-direction: column; gap: 3px; }
+  .filter-group label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; }
+  .filter-group input, .filter-group select {
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+    font-size: 13px; min-width: 120px;
+  }
+  .pagination { display: flex; gap: 6px; align-items: center; justify-content: center; margin-top: 16px; }
+  .page-btn {
+    padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--surface); font-size: 13px; cursor: pointer;
+  }
+  .page-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .page-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .page-info { font-size: 13px; color: var(--muted); }
+  .price { font-weight: 600; color: var(--primary-dark); }
+  .amount-unit { font-size: 11px; color: var(--muted); margin-left: 2px; }
+  td.number { text-align: right; font-variant-numeric: tabular-nums; }
+  .type-sale { color: #dc2626; }
+  .type-jeonse { color: #2563eb; }
+  .empty-msg { text-align: center; padding: 48px; color: var(--muted); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Data Viewer</h1>
+</div>
+
+<!-- Summary cards -->
+<div class="stats-grid">
+  <div class="card">
+    <div class="card-title">Transactions</div>
+    <div class="card-value">{{ "{:,}".format(summary.transactions) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Price Statistics</div>
+    <div class="card-value">{{ "{:,}".format(summary.statistics) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Complexes</div>
+    <div class="card-value">{{ "{:,}".format(summary.complexes) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Buildings</div>
+    <div class="card-value">{{ "{:,}".format(summary.buildings) }}</div>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('transactions')">Transactions</button>
+  <button class="tab-btn" onclick="switchTab('statistics')">Price Index</button>
+</div>
+
+<!-- Tab: Transactions -->
+<div id="tab-transactions" class="tab-panel active">
+  <div class="filter-row">
+    <div class="filter-group">
+      <label>Region</label>
+      <select id="tx-region">
+        <option value="">All</option>
+        {% for r in regions %}
+        <option value="{{ r.region_code }}">{{ r.name }} ({{ r.parent_area }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Type</label>
+      <select id="tx-type">
+        <option value="">All</option>
+        <option value="sale">Sale</option>
+        <option value="jeonse">Jeonse</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Year</label>
+      <input type="number" id="tx-year" placeholder="2026" min="2000" max="2030" />
+    </div>
+    <div class="filter-group">
+      <label>Month</label>
+      <input type="number" id="tx-month" placeholder="1-12" min="1" max="12" />
+    </div>
+    <div class="filter-group">
+      <label>Apt Name</label>
+      <input type="text" id="tx-apt" placeholder="Search..." />
+    </div>
+    <div class="filter-group">
+      <label>Sort</label>
+      <select id="tx-sort">
+        <option value="deal_date_desc">Date (newest)</option>
+        <option value="price_desc">Price (high)</option>
+        <option value="price_asc">Price (low)</option>
+        <option value="area_desc">Area (large)</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>&nbsp;</label>
+      <button class="btn btn-primary btn-sm" onclick="loadTransactions(1)">Search</button>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <div class="table-header">
+      <span class="table-title" id="tx-title">Transactions</span>
+      <span class="page-info" id="tx-info"></span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Type</th>
+          <th>Region</th>
+          <th>Dong</th>
+          <th>Apartment</th>
+          <th style="text-align:right">Area (m²)</th>
+          <th style="text-align:right">Floor</th>
+          <th style="text-align:right">Price (만원)</th>
+          <th style="text-align:right">Deposit</th>
+          <th style="text-align:right">Rent</th>
+        </tr>
+      </thead>
+      <tbody id="tx-body">
+        <tr><td colspan="10" class="empty-msg">Click Search to load data</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="pagination" id="tx-pagination"></div>
+</div>
+
+<!-- Tab: Statistics -->
+<div id="tab-statistics" class="tab-panel">
+  <div class="filter-row">
+    <div class="filter-group">
+      <label>Type</label>
+      <select id="st-type">
+        <option value="">All</option>
+        <option value="sale_index">Sale Index</option>
+        <option value="jeonse_index">Jeonse Index</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Region</label>
+      <input type="text" id="st-region" placeholder="e.g. 서울" />
+    </div>
+    <div class="filter-group">
+      <label>Period From</label>
+      <input type="text" id="st-from" placeholder="2025-01" />
+    </div>
+    <div class="filter-group">
+      <label>Period To</label>
+      <input type="text" id="st-to" placeholder="2026-03" />
+    </div>
+    <div class="filter-group">
+      <label>&nbsp;</label>
+      <button class="btn btn-primary btn-sm" onclick="loadStatistics(1)">Search</button>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <div class="table-header">
+      <span class="table-title" id="st-title">Price Statistics</span>
+      <span class="page-info" id="st-info"></span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th>Type</th>
+          <th>Region</th>
+          <th style="text-align:right">Index Value</th>
+          <th>Source</th>
+        </tr>
+      </thead>
+      <tbody id="st-body">
+        <tr><td colspan="5" class="empty-msg">Click Search to load data</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="pagination" id="st-pagination"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  /* ── Tabs ── */
+  function switchTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    event.target.classList.add('active');
+  }
+
+  /* ── Formatting ── */
+  function fmtPrice(val) {
+    if (val == null) return '-';
+    return val.toLocaleString('ko-KR');
+  }
+
+  function fmtDate(y, m, d) {
+    if (!y) return '-';
+    let s = y + '.' + String(m).padStart(2, '0');
+    if (d) s += '.' + String(d).padStart(2, '0');
+    return s;
+  }
+
+  function typeBadge(t) {
+    if (t === 'sale') return '<span class="badge badge-red">매매</span>';
+    if (t === 'jeonse') return '<span class="badge badge-blue">전세</span>';
+    return '<span class="badge badge-gray">' + t + '</span>';
+  }
+
+  function statBadge(t) {
+    if (t === 'sale_index') return '<span class="badge badge-red">매매지수</span>';
+    if (t === 'jeonse_index') return '<span class="badge badge-blue">전세지수</span>';
+    return '<span class="badge badge-gray">' + t + '</span>';
+  }
+
+  /* ── Transactions ── */
+  let txPage = 1;
+
+  async function loadTransactions(page) {
+    txPage = page;
+    const params = new URLSearchParams();
+    const region = document.getElementById('tx-region').value;
+    const type = document.getElementById('tx-type').value;
+    const year = document.getElementById('tx-year').value;
+    const month = document.getElementById('tx-month').value;
+    const apt = document.getElementById('tx-apt').value;
+    const sort = document.getElementById('tx-sort').value;
+
+    if (region) params.set('region_code', region);
+    if (type) params.set('transaction_type', type);
+    if (year) params.set('deal_year', year);
+    if (month) params.set('deal_month', month);
+    if (apt) params.set('apt_name', apt);
+    params.set('sort', sort);
+    params.set('page', page);
+    params.set('per_page', 50);
+
+    try {
+      const data = await apiFetch('/api/data/transactions?' + params);
+      renderTransactions(data);
+    } catch (e) {
+      showToast('Failed to load: ' + e.message, 'error');
+    }
+  }
+
+  function renderTransactions(data) {
+    const tbody = document.getElementById('tx-body');
+    document.getElementById('tx-title').textContent = `Transactions (${data.total.toLocaleString()} total)`;
+    document.getElementById('tx-info').textContent = `Page ${data.page} / ${data.total_pages}`;
+
+    if (!data.items.length) {
+      tbody.innerHTML = '<tr><td colspan="10" class="empty-msg">No data found</td></tr>';
+      document.getElementById('tx-pagination').innerHTML = '';
+      return;
+    }
+
+    tbody.innerHTML = data.items.map(r => `
+      <tr>
+        <td>${fmtDate(r.deal_year, r.deal_month, r.deal_day)}</td>
+        <td>${typeBadge(r.transaction_type)}</td>
+        <td>${r.region_code}</td>
+        <td>${r.dong_name || '-'}</td>
+        <td><strong>${r.apt_name}</strong></td>
+        <td class="number">${r.exclusive_area ? r.exclusive_area.toFixed(1) : '-'}</td>
+        <td class="number">${r.floor ?? '-'}</td>
+        <td class="number"><span class="price">${fmtPrice(r.deal_amount)}</span></td>
+        <td class="number">${fmtPrice(r.deposit)}</td>
+        <td class="number">${fmtPrice(r.monthly_rent)}</td>
+      </tr>
+    `).join('');
+
+    renderPagination('tx-pagination', data.page, data.total_pages, loadTransactions);
+  }
+
+  /* ── Statistics ── */
+  let stPage = 1;
+
+  async function loadStatistics(page) {
+    stPage = page;
+    const params = new URLSearchParams();
+    const type = document.getElementById('st-type').value;
+    const region = document.getElementById('st-region').value;
+    const from = document.getElementById('st-from').value;
+    const to = document.getElementById('st-to').value;
+
+    if (type) params.set('stat_type', type);
+    if (region) params.set('region_name', region);
+    if (from) params.set('period_from', from);
+    if (to) params.set('period_to', to);
+    params.set('page', page);
+    params.set('per_page', 50);
+
+    try {
+      const data = await apiFetch('/api/data/statistics?' + params);
+      renderStatistics(data);
+    } catch (e) {
+      showToast('Failed to load: ' + e.message, 'error');
+    }
+  }
+
+  function renderStatistics(data) {
+    const tbody = document.getElementById('st-body');
+    document.getElementById('st-title').textContent = `Price Statistics (${data.total.toLocaleString()} total)`;
+    document.getElementById('st-info').textContent = `Page ${data.page} / ${data.total_pages}`;
+
+    if (!data.items.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-msg">No data found</td></tr>';
+      document.getElementById('st-pagination').innerHTML = '';
+      return;
+    }
+
+    tbody.innerHTML = data.items.map(r => `
+      <tr>
+        <td>${r.period}</td>
+        <td>${statBadge(r.stat_type)}</td>
+        <td>${r.region_name}</td>
+        <td class="number"><span class="price">${r.value ? r.value.toFixed(4) : '-'}</span></td>
+        <td>${r.source}</td>
+      </tr>
+    `).join('');
+
+    renderPagination('st-pagination', data.page, data.total_pages, loadStatistics);
+  }
+
+  /* ── Pagination ── */
+  function renderPagination(containerId, current, totalPages, loadFn) {
+    const el = document.getElementById(containerId);
+    if (totalPages <= 1) { el.innerHTML = ''; return; }
+
+    let html = '';
+    html += `<button class="page-btn" onclick="(${loadFn.name})(${current - 1})" ${current <= 1 ? 'disabled' : ''}>&#8592; Prev</button>`;
+
+    const start = Math.max(1, current - 3);
+    const end = Math.min(totalPages, current + 3);
+
+    if (start > 1) html += `<button class="page-btn" onclick="(${loadFn.name})(1)">1</button>`;
+    if (start > 2) html += '<span style="color:var(--muted)">...</span>';
+
+    for (let i = start; i <= end; i++) {
+      html += `<button class="page-btn ${i === current ? 'active' : ''}" onclick="(${loadFn.name})(${i})">${i}</button>`;
+    }
+
+    if (end < totalPages - 1) html += '<span style="color:var(--muted)">...</span>';
+    if (end < totalPages) html += `<button class="page-btn" onclick="(${loadFn.name})(${totalPages})">${totalPages}</button>`;
+
+    html += `<button class="page-btn" onclick="(${loadFn.name})(${current + 1})" ${current >= totalPages ? 'disabled' : ''}>Next &#8594;</button>`;
+    el.innerHTML = html;
+  }
+
+  /* ── Init: auto-load on page visit ── */
+  loadTransactions(1);
+</script>
+{% endblock %}
