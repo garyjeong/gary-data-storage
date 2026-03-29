@@ -90,27 +90,44 @@
 
 <!-- Manual Trigger -->
 <div class="trigger-card">
-  <div style="font-weight:600;font-size:14px;margin-bottom:14px;">수동 수집 실행</div>
-  <div class="trigger-grid">
-    <div class="form-group" style="margin:0;">
-      <label>소스 선택</label>
-      <select id="trigger-source" multiple style="height:80px;">
-        <option value="">— 전체 소스 —</option>
-        {% for name in source_names %}
-        <option value="{{ name }}">{{ name }}</option>
-        {% endfor %}
-      </select>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">Ctrl/Cmd 클릭으로 복수 선택</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <div style="font-weight:600;font-size:14px;">수동 수집 실행</div>
+    <div style="display:flex;gap:6px;">
+      <button class="btn btn-ghost btn-sm" onclick="toggleAllTriggerSources(true)" style="cursor:pointer;">전체 선택</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleAllTriggerSources(false)" style="cursor:pointer;">전체 해제</button>
     </div>
-    <div class="form-group" style="margin:0;">
-      <label>지역 코드</label>
-      <textarea id="trigger-regions" rows="3" placeholder="줄 단위로 입력 (비우면 전체)&#10;11680&#10;11650"></textarea>
+  </div>
+  {% set source_desc = {
+    'molit_sale': '국토부 매매 실거래',
+    'molit_jeonse': '국토부 전세 실거래',
+    'building': '건축물대장',
+    'official_price': '공시가격',
+    'reb': '부동산원 가격지수',
+    'seoul': '서울 열린데이터',
+    'gyeonggi': '경기 데이터드림',
+    'naver': '네이버 부동산',
+    'zigbang': '직방',
+    'hogangnono': '호갱노노'
+  } %}
+  <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:6px;margin-bottom:16px;" id="trigger-checkboxes">
+    {% for name in source_names %}
+    <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--primary-light);border-radius:var(--radius);cursor:pointer;font-weight:400;font-size:13px;transition:all 150ms;background:var(--primary-bg);" class="trigger-label">
+      <input type="checkbox" name="trigger-source" value="{{ name }}" checked style="accent-color:var(--primary);cursor:pointer;" />
+      <span style="display:flex;flex-direction:column;line-height:1.3;">
+        <span style="font-weight:600;">{{ source_desc.get(name, name) }}</span>
+        <span style="font-size:11px;color:var(--text-muted);">{{ name }}</span>
+      </span>
+    </label>
+    {% endfor %}
+  </div>
+  <div style="display:flex;gap:16px;align-items:end;">
+    <div class="form-group" style="margin:0;flex:1;">
+      <label>지역 코드 <span style="color:var(--text-muted);font-weight:400;">(비우면 전체)</span></label>
+      <input type="text" id="trigger-regions" placeholder="예: 11680, 11650 (쉼표 구분)" />
     </div>
-    <div>
-      <button class="btn btn-primary" id="trigger-btn" onclick="runTrigger()" style="cursor:pointer;">
-        수집 시작
-      </button>
-    </div>
+    <button class="btn btn-primary" id="trigger-btn" onclick="runTrigger()" style="cursor:pointer;">
+      수집 시작
+    </button>
   </div>
 </div>
 
@@ -289,17 +306,42 @@
   }
 
   // ── Manual Trigger ──
+  function toggleAllTriggerSources(checked) {
+    document.querySelectorAll('#trigger-checkboxes input[type="checkbox"]').forEach(cb => {
+      cb.checked = checked;
+      const label = cb.closest('.trigger-label');
+      label.style.borderColor = checked ? 'var(--primary-light)' : 'var(--border)';
+      label.style.background = checked ? 'var(--primary-bg)' : '';
+    });
+  }
+
+  document.querySelectorAll('#trigger-checkboxes input[type="checkbox"]').forEach(cb => {
+    const updateStyle = () => {
+      const label = cb.closest('.trigger-label');
+      label.style.borderColor = cb.checked ? 'var(--primary-light)' : 'var(--border)';
+      label.style.background = cb.checked ? 'var(--primary-bg)' : '';
+    };
+    cb.addEventListener('change', updateStyle);
+    updateStyle();
+  });
+
   async function runTrigger() {
-    const select = document.getElementById("trigger-source");
-    const selected = Array.from(select.selectedOptions).map(o => o.value).filter(Boolean);
-    const sources = selected.length ? selected : null;
+    const checked = Array.from(document.querySelectorAll('#trigger-checkboxes input:checked')).map(cb => cb.value);
+    const total = document.querySelectorAll('#trigger-checkboxes input[type="checkbox"]').length;
+    const sources = checked.length === total ? null : (checked.length ? checked : null);
     const regionsRaw = document.getElementById("trigger-regions").value.trim();
-    const region_codes = regionsRaw ? regionsRaw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean) : null;
+    const region_codes = regionsRaw ? regionsRaw.split(/[,\s]+/).map(s => s.trim()).filter(Boolean) : null;
+
+    if (checked.length === 0) {
+      showToast("최소 1개 소스를 선택해주세요", "error");
+      return;
+    }
+
     const btn = document.getElementById("trigger-btn");
     btn.disabled = true; btn.textContent = "시작 중...";
     try {
       await apiFetch("/api/collect", { method: "POST", body: JSON.stringify({ sources, region_codes }) });
-      showToast("수집이 시작되었습니다!", "success");
+      showToast(`수집 시작! (${checked.length}개 소스)`, "success");
     } catch (e) {
       showToast("오류: " + e.message, "error");
     } finally {

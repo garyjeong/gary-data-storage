@@ -157,19 +157,45 @@
 
 <!-- Collect Modal -->
 <div class="modal-backdrop" id="collect-modal">
-  <div class="modal">
+  <div class="modal" style="width:520px;">
     <div class="modal-title">수동 수집 실행</div>
     <div class="form-group">
-      <label>소스 (쉼표 구분, 비우면 전체)</label>
-      <input type="text" id="collect-sources" placeholder="예: molit_sale, naver" />
+      <label style="margin-bottom:8px;">수집 소스 선택</label>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="toggleAllSources(true)" style="cursor:pointer;">전체 선택</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleAllSources(false)" style="cursor:pointer;">전체 해제</button>
+      </div>
+      {% set source_desc = {
+        'molit_sale': '국토부 매매 실거래',
+        'molit_jeonse': '국토부 전세 실거래',
+        'building': '건축물대장',
+        'official_price': '공시가격',
+        'reb': '부동산원 가격지수',
+        'seoul': '서울 열린데이터',
+        'gyeonggi': '경기 데이터드림',
+        'naver': '네이버 부동산',
+        'zigbang': '직방',
+        'hogangnono': '호갱노노'
+      } %}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;" id="source-checkboxes">
+        {% for name in source_names %}
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--primary-light);border-radius:var(--radius);cursor:pointer;font-weight:400;font-size:13px;transition:all 150ms;background:var(--primary-bg);" class="source-label">
+          <input type="checkbox" name="source" value="{{ name }}" checked style="accent-color:var(--primary);cursor:pointer;" />
+          <span style="display:flex;flex-direction:column;line-height:1.3;">
+            <span style="font-weight:600;">{{ source_desc.get(name, name) }}</span>
+            <span style="font-size:11px;color:var(--text-muted);">{{ name }}</span>
+          </span>
+        </label>
+        {% endfor %}
+      </div>
     </div>
     <div class="form-group">
-      <label>지역코드 (쉼표 구분, 비우면 전체)</label>
-      <input type="text" id="collect-regions" placeholder="예: 11680, 11650" />
+      <label>지역 <span style="color:var(--text-muted);font-weight:400;">(비우면 전체 활성 지역)</span></label>
+      <input type="text" id="collect-regions" placeholder="예: 11680, 11650 (쉼표 구분)" />
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('collect-modal')">취소</button>
-      <button class="btn btn-primary" id="collect-submit" onclick="submitCollect()">수집 시작</button>
+      <button class="btn btn-primary" id="collect-submit" onclick="submitCollect()" style="cursor:pointer;">수집 시작</button>
     </div>
   </div>
 </div>
@@ -211,16 +237,42 @@
     }
   }
 
+  function toggleAllSources(checked) {
+    document.querySelectorAll('#source-checkboxes input[type="checkbox"]').forEach(cb => {
+      cb.checked = checked;
+      cb.closest('.source-label').style.borderColor = checked ? 'var(--primary-light)' : 'var(--border)';
+      cb.closest('.source-label').style.background = checked ? 'var(--primary-bg)' : '';
+    });
+  }
+
+  // Highlight selected source labels
+  document.querySelectorAll('#source-checkboxes input[type="checkbox"]').forEach(cb => {
+    const updateStyle = () => {
+      const label = cb.closest('.source-label');
+      label.style.borderColor = cb.checked ? 'var(--primary-light)' : 'var(--border)';
+      label.style.background = cb.checked ? 'var(--primary-bg)' : '';
+    };
+    cb.addEventListener('change', updateStyle);
+    updateStyle(); // init
+  });
+
   async function submitCollect() {
-    const sourcesRaw = document.getElementById("collect-sources").value.trim();
+    const checked = Array.from(document.querySelectorAll('#source-checkboxes input:checked')).map(cb => cb.value);
+    const total = document.querySelectorAll('#source-checkboxes input[type="checkbox"]').length;
+    const sources = checked.length === total ? null : (checked.length ? checked : null);
     const regionsRaw = document.getElementById("collect-regions").value.trim();
-    const sources = sourcesRaw ? sourcesRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
-    const region_codes = regionsRaw ? regionsRaw.split(",").map(s => s.trim()).filter(Boolean) : null;
+    const region_codes = regionsRaw ? regionsRaw.split(/[,\s]+/).map(s => s.trim()).filter(Boolean) : null;
+
+    if (checked.length === 0) {
+      showToast("최소 1개 소스를 선택해주세요", "error");
+      return;
+    }
+
     const btn = document.getElementById("collect-submit");
     try {
       btn.disabled = true; btn.textContent = "시작 중...";
       await apiFetch("/api/collect", { method: "POST", body: JSON.stringify({ sources, region_codes }) });
-      showToast("수집이 시작되었습니다!", "success");
+      showToast(`수집 시작! (${checked.length}개 소스)`, "success");
       closeModal("collect-modal");
       setTimeout(loadLogs, 2000);
     } catch (e) {

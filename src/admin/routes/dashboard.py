@@ -57,6 +57,10 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     )
     latest_transactions = latest_tx.scalars().all()
 
+    # Source names for collect modal
+    manager = request.app.state.manager
+    source_names = list(manager.collectors.keys()) if manager else []
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -71,6 +75,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
             "jeonse_count": jeonse_count,
             "sale_avg": int(sale_avg) if sale_avg else 0,
             "latest_transactions": latest_transactions,
+            "source_names": source_names,
         },
     )
 
