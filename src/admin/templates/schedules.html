@@ -1,26 +1,54 @@
 {% extends "base.html" %}
-{% block title %}Schedules — RE Admin{% endblock %}
+{% block title %}스케줄 관리{% endblock %}
 {% block nav_schedules %}active{% endblock %}
+{% block topbar_title %}스케줄 관리{% endblock %}
+{% block topbar_actions %}
+  <button class="btn btn-primary btn-sm" onclick="openAddModal()">+ 스케줄 추가</button>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+  .status-bar {
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+    padding: 16px 20px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); box-shadow: var(--shadow);
+    margin-bottom: 20px;
+  }
+  .status-item { font-size: 13px; color: var(--text-secondary); }
+  .status-item strong { color: var(--text); }
+  .trigger-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); box-shadow: var(--shadow);
+    padding: 20px; margin-top: 20px;
+  }
+  .trigger-grid {
+    display: grid; grid-template-columns: 1fr 1fr auto;
+    gap: 16px; align-items: end;
+  }
+  @media (max-width: 768px) { .trigger-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="page-header">
-  <h1 class="page-title">Schedules</h1>
-  <button class="btn btn-primary" onclick="openAddModal()">+ Add Schedule</button>
+<!-- Scheduler Status Bar -->
+<div class="status-bar" id="status-bar">
+  <div class="status-item" id="status-display">상태 로딩 중...</div>
 </div>
 
 <!-- Schedules Table -->
-<div class="table-wrap" style="margin-bottom:24px;">
+<div class="table-wrap" style="margin-bottom:20px;">
   <div class="table-header">
-    <span class="table-title">Collection Schedules</span>
+    <span class="table-title">수집 스케줄</span>
   </div>
   <table>
     <thead>
       <tr>
-        <th>Name</th>
-        <th>Source</th>
-        <th>Interval</th>
-        <th>Active</th>
-        <th style="width:100px;">Actions</th>
+        <th>이름</th>
+        <th>소스</th>
+        <th>수집 간격</th>
+        <th>활성</th>
+        <th style="width:100px;text-align:center;">관리</th>
       </tr>
     </thead>
     <tbody id="schedules-tbody">
@@ -31,12 +59,10 @@
           {% if s.source_type %}
             <span class="badge badge-blue">{{ s.source_type }}</span>
           {% else %}
-            <span style="color:var(--muted);">all</span>
+            <span class="badge badge-gray">전체</span>
           {% endif %}
         </td>
-        <td>
-          <span id="interval-display-{{ s.id }}">{{ s.interval_minutes }}m</span>
-        </td>
+        <td>{{ s.interval_minutes }}분</td>
         <td>
           <label class="toggle">
             <input type="checkbox" {% if s.is_active %}checked{% endif %}
@@ -44,91 +70,99 @@
             <span class="toggle-slider"></span>
           </label>
         </td>
-        <td>
-          <button class="btn btn-ghost btn-sm btn-icon" title="Edit"
-            onclick="openEditModal({{ s.id }}, '{{ s.name }}', '{{ s.source_type or '' }}', {{ s.interval_minutes }}, {{ 'true' if s.is_active else 'false' }})">&#9998;</button>
-          <button class="btn btn-danger btn-sm btn-icon" title="Delete"
-            onclick="deleteSchedule({{ s.id }}, '{{ s.name }}')">&#128465;</button>
+        <td style="text-align:center;">
+          <button class="btn btn-ghost btn-sm btn-icon" title="수정" style="cursor:pointer;"
+            onclick="openEditModal({{ s.id }}, '{{ s.name }}', '{{ s.source_type or '' }}', {{ s.interval_minutes }}, {{ 'true' if s.is_active else 'false' }})">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          </button>
+          <button class="btn btn-ghost btn-sm btn-icon delete-btn" title="삭제" style="cursor:pointer;"
+            onclick="confirmDelete({{ s.id }}, '{{ s.name }}')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+          </button>
         </td>
       </tr>
       {% else %}
-      <tr class="empty-row"><td colspan="5">No schedules yet</td></tr>
+      <tr class="empty-row"><td colspan="5">스케줄 없음</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 
-<!-- Manual Trigger Section -->
-<div class="table-wrap">
-  <div class="table-header">
-    <span class="table-title">Manual Collection Trigger</span>
-  </div>
-  <div style="padding:20px;">
-    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:16px;align-items:end;">
-      <div class="form-group" style="margin:0;">
-        <label>Sources</label>
-        <select id="trigger-source" multiple style="height:90px;">
-          <option value="">— all sources —</option>
-          {% for name in source_names %}
-          <option value="{{ name }}">{{ name }}</option>
-          {% endfor %}
-        </select>
-        <div style="font-size:11px;color:var(--muted);margin-top:3px;">Hold Ctrl/Cmd to select multiple</div>
-      </div>
-      <div class="form-group" style="margin:0;">
-        <label>Region codes</label>
-        <textarea id="trigger-regions" rows="3" placeholder="One code per line, or blank for all&#10;11110&#10;11140"></textarea>
-      </div>
-      <div>
-        <button class="btn btn-primary" id="trigger-btn" onclick="runTrigger()">
-          &#9654; Run Now
-        </button>
-      </div>
+<!-- Manual Trigger -->
+<div class="trigger-card">
+  <div style="font-weight:600;font-size:14px;margin-bottom:14px;">수동 수집 실행</div>
+  <div class="trigger-grid">
+    <div class="form-group" style="margin:0;">
+      <label>소스 선택</label>
+      <select id="trigger-source" multiple style="height:80px;">
+        <option value="">— 전체 소스 —</option>
+        {% for name in source_names %}
+        <option value="{{ name }}">{{ name }}</option>
+        {% endfor %}
+      </select>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">Ctrl/Cmd 클릭으로 복수 선택</div>
     </div>
-    <div id="trigger-result" style="margin-top:12px;display:none;">
-      <span class="badge badge-green">&#10003; Collection started!</span>
+    <div class="form-group" style="margin:0;">
+      <label>지역 코드</label>
+      <textarea id="trigger-regions" rows="3" placeholder="줄 단위로 입력 (비우면 전체)&#10;11680&#10;11650"></textarea>
+    </div>
+    <div>
+      <button class="btn btn-primary" id="trigger-btn" onclick="runTrigger()" style="cursor:pointer;">
+        수집 시작
+      </button>
     </div>
   </div>
-</div>
-
-<!-- Scheduler Status -->
-<div style="margin-top:24px;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);">
-  <div style="font-weight:600;margin-bottom:8px;font-size:13px;">Scheduler Status</div>
-  <div id="status-display" style="color:var(--muted);font-size:13px;">Loading…</div>
 </div>
 
 <!-- Add/Edit Modal -->
 <div class="modal-backdrop" id="schedule-modal">
   <div class="modal">
-    <div class="modal-title" id="modal-title">Add Schedule</div>
+    <div class="modal-title" id="modal-title">스케줄 추가</div>
     <input type="hidden" id="edit-id" />
     <div class="form-group">
-      <label>Name</label>
-      <input type="text" id="field-name" placeholder="e.g. nightly-all" />
+      <label>이름</label>
+      <input type="text" id="field-name" placeholder="예: 기본 수집" />
     </div>
     <div class="form-group">
-      <label>Source Type <span style="color:var(--muted);font-weight:400;">(blank = all)</span></label>
+      <label>소스 <span style="color:var(--text-muted);font-weight:400;">(비우면 전체)</span></label>
       <select id="field-source">
-        <option value="">— all —</option>
+        <option value="">— 전체 —</option>
         {% for name in source_names %}
         <option value="{{ name }}">{{ name }}</option>
         {% endfor %}
       </select>
     </div>
     <div class="form-group">
-      <label>Interval (minutes)</label>
-      <input type="number" id="field-interval" value="60" min="1" />
+      <label>수집 간격 (분)</label>
+      <input type="number" id="field-interval" value="30" min="1" />
     </div>
     <div class="form-group" style="display:flex;align-items:center;gap:10px;">
-      <label style="margin:0;">Active</label>
+      <label style="margin:0;">활성</label>
       <label class="toggle">
         <input type="checkbox" id="field-active" checked />
         <span class="toggle-slider"></span>
       </label>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('schedule-modal')">Cancel</button>
-      <button class="btn btn-primary" id="modal-save-btn" onclick="saveSchedule()">Save</button>
+      <button class="btn btn-ghost" onclick="closeModal('schedule-modal')">취소</button>
+      <button class="btn btn-primary" id="modal-save-btn" onclick="saveSchedule()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div class="modal-backdrop" id="delete-modal">
+  <div class="modal" style="width:380px;">
+    <div style="text-align:center;margin-bottom:16px;">
+      <div style="width:48px;height:48px;border-radius:50%;background:var(--danger-bg);display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+      </div>
+      <div class="modal-title" style="margin-bottom:4px;">삭제 확인</div>
+      <p style="color:var(--text-secondary);font-size:13px;" id="delete-msg">이 스케줄을 삭제하시겠습니까?</p>
+    </div>
+    <div class="modal-footer" style="justify-content:center;">
+      <button class="btn btn-ghost" onclick="closeModal('delete-modal')">취소</button>
+      <button class="btn btn-danger" id="delete-confirm-btn" onclick="executeDelete()">삭제</button>
     </div>
   </div>
 </div>
@@ -136,55 +170,84 @@
 
 {% block scripts %}
 <script>
+  let pendingDeleteId = null;
+
   // ── Status ──
   async function loadStatus() {
     try {
       const data = await apiFetch("/api/status");
       const s = data.scheduler;
       const el = document.getElementById("status-display");
-      el.innerHTML = `
-        <span class="badge ${s.running ? 'badge-green' : 'badge-red'}" style="margin-right:8px;">
-          ${s.running ? "&#9679; Running" : "&#9679; Stopped"}
-        </span>
-        Sources: <strong>${data.registered_sources.join(", ") || "none"}</strong>
-        ${s.next_run_time ? ` &nbsp;|&nbsp; Next run: <strong>${s.next_run_time}</strong>` : ""}
-      `;
+      const badge = s.running
+        ? '<span class="badge badge-green" style="margin-right:8px;">실행 중</span>'
+        : '<span class="badge badge-red" style="margin-right:8px;">중지됨</span>';
+      const sources = data.registered_sources?.length || 0;
+      const next = s.next_run_time
+        ? ` <span class="status-item" style="margin-left:8px;">다음 실행: <strong>${s.next_run_time.replace('T',' ').slice(0,16)}</strong></span>` : '';
+      el.innerHTML = `${badge}
+        <span class="status-item">등록 소스: <strong>${sources}개</strong></span>
+        <span class="status-item">간격: <strong>${s.interval_minutes ? Math.round(s.interval_minutes) + '분' : '-'}</strong></span>
+        ${next}`;
     } catch (e) {
-      document.getElementById("status-display").textContent = "Could not load status";
+      document.getElementById("status-display").textContent = "상태 로딩 실패";
     }
   }
   loadStatus();
 
   // ── Modal ──
   function openAddModal() {
-    document.getElementById("modal-title").textContent = "Add Schedule";
+    document.getElementById("modal-title").textContent = "스케줄 추가";
     document.getElementById("edit-id").value = "";
     document.getElementById("field-name").value = "";
     document.getElementById("field-source").value = "";
-    document.getElementById("field-interval").value = "60";
+    document.getElementById("field-interval").value = "30";
     document.getElementById("field-active").checked = true;
-    document.getElementById("modal-save-btn").textContent = "Add";
+    document.getElementById("modal-save-btn").textContent = "추가";
     document.getElementById("schedule-modal").classList.add("open");
   }
 
   function openEditModal(id, name, source, interval, isActive) {
-    document.getElementById("modal-title").textContent = "Edit Schedule";
+    document.getElementById("modal-title").textContent = "스케줄 수정";
     document.getElementById("edit-id").value = id;
     document.getElementById("field-name").value = name;
     document.getElementById("field-source").value = source;
     document.getElementById("field-interval").value = interval;
     document.getElementById("field-active").checked = isActive;
-    document.getElementById("modal-save-btn").textContent = "Save";
+    document.getElementById("modal-save-btn").textContent = "저장";
     document.getElementById("schedule-modal").classList.add("open");
-  }
-
-  function closeModal(id) {
-    document.getElementById(id).classList.remove("open");
   }
 
   document.getElementById("schedule-modal").addEventListener("click", function(e) {
     if (e.target === this) closeModal("schedule-modal");
   });
+  document.getElementById("delete-modal").addEventListener("click", function(e) {
+    if (e.target === this) closeModal("delete-modal");
+  });
+
+  // ── Delete Confirm ──
+  function confirmDelete(id, name) {
+    pendingDeleteId = id;
+    document.getElementById("delete-msg").innerHTML =
+      `<strong>${name}</strong> 스케줄을 삭제하시겠습니까?<br><span style="font-size:12px;color:var(--danger);">이 작업은 되돌릴 수 없습니다.</span>`;
+    document.getElementById("delete-modal").classList.add("open");
+  }
+
+  async function executeDelete() {
+    if (!pendingDeleteId) return;
+    const btn = document.getElementById("delete-confirm-btn");
+    try {
+      btn.disabled = true; btn.textContent = "삭제 중...";
+      await apiFetch(`/api/schedules/${pendingDeleteId}`, { method: "DELETE" });
+      showToast("스케줄이 삭제되었습니다", "success");
+      document.querySelector(`tr[data-id="${pendingDeleteId}"]`).remove();
+      closeModal("delete-modal");
+    } catch (e) {
+      showToast("오류: " + e.message, "error");
+    } finally {
+      btn.disabled = false; btn.textContent = "삭제";
+      pendingDeleteId = null;
+    }
+  }
 
   // ── CRUD ──
   async function saveSchedule() {
@@ -197,79 +260,50 @@
       is_active: document.getElementById("field-active").checked,
     };
     if (!payload.name || isNaN(payload.interval_minutes) || payload.interval_minutes < 1) {
-      showToast("Name and a valid interval are required", "error");
+      showToast("이름과 유효한 간격을 입력해주세요", "error");
       return;
     }
     try {
       if (id) {
         await apiFetch(`/api/schedules/${id}`, { method: "PUT", body: JSON.stringify(payload) });
-        showToast("Schedule updated", "success");
+        showToast("스케줄이 수정되었습니다", "success");
       } else {
         await apiFetch("/api/schedules/", { method: "POST", body: JSON.stringify(payload) });
-        showToast("Schedule added", "success");
+        showToast("스케줄이 추가되었습니다", "success");
       }
       closeModal("schedule-modal");
       location.reload();
     } catch (e) {
-      showToast("Error: " + e.message, "error");
+      showToast("오류: " + e.message, "error");
     }
   }
 
   async function toggleScheduleActive(id, isActive) {
     try {
-      await apiFetch(`/api/schedules/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({ is_active: isActive }),
-      });
-      showToast(isActive ? "Schedule activated" : "Schedule deactivated");
+      await apiFetch(`/api/schedules/${id}`, { method: "PUT", body: JSON.stringify({ is_active: isActive }) });
+      showToast(isActive ? "스케줄 활성화됨" : "스케줄 비활성화됨");
     } catch (e) {
-      showToast("Error: " + e.message, "error");
+      showToast("오류: " + e.message, "error");
       location.reload();
-    }
-  }
-
-  async function deleteSchedule(id, name) {
-    if (!confirm(`Delete schedule "${name}"?`)) return;
-    try {
-      await apiFetch(`/api/schedules/${id}`, { method: "DELETE" });
-      showToast("Schedule deleted");
-      document.querySelector(`tr[data-id="${id}"]`).remove();
-    } catch (e) {
-      showToast("Error: " + e.message, "error");
     }
   }
 
   // ── Manual Trigger ──
   async function runTrigger() {
     const select = document.getElementById("trigger-source");
-    const selected = Array.from(select.selectedOptions)
-      .map(o => o.value)
-      .filter(Boolean);
+    const selected = Array.from(select.selectedOptions).map(o => o.value).filter(Boolean);
     const sources = selected.length ? selected : null;
-
     const regionsRaw = document.getElementById("trigger-regions").value.trim();
-    const region_codes = regionsRaw
-      ? regionsRaw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean)
-      : null;
-
+    const region_codes = regionsRaw ? regionsRaw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean) : null;
     const btn = document.getElementById("trigger-btn");
-    btn.disabled = true;
-    btn.textContent = "Starting…";
-
+    btn.disabled = true; btn.textContent = "시작 중...";
     try {
-      await apiFetch("/api/collect", {
-        method: "POST",
-        body: JSON.stringify({ sources, region_codes }),
-      });
-      const resultEl = document.getElementById("trigger-result");
-      resultEl.style.display = "block";
-      setTimeout(() => { resultEl.style.display = "none"; }, 4000);
-      showToast("Collection started!", "success");
+      await apiFetch("/api/collect", { method: "POST", body: JSON.stringify({ sources, region_codes }) });
+      showToast("수집이 시작되었습니다!", "success");
     } catch (e) {
-      showToast("Error: " + e.message, "error");
+      showToast("오류: " + e.message, "error");
     } finally {
-      btn.disabled = false;
-      btn.textContent = "▶ Run Now";
+      btn.disabled = false; btn.textContent = "수집 시작";
     }
   }
 </script>
